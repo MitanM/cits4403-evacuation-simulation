@@ -15,6 +15,17 @@ GREEN = (0, 255, 0)
 # Cell types 
 EMPTY, WALL, EXIT = 0, 1, 2 
 
+# Placement modes
+MODE_WALL, MODE_AGENT, MODE_EXIT = 1, 2, 3
+
+
+def make_screen(grid_w, grid_h, cell_size):
+    return pygame.display.set_mode((grid_w * cell_size, grid_h * cell_size))
+
+def in_bounds(x, y, grid_w, grid_h):
+    return 0 <= x < grid_w and 0 <= y < grid_h
+
+
 def main():
     pygame.init() 
 
@@ -28,9 +39,14 @@ def main():
         grid_height = 20
     
     # Create the window using grid sizes 
-    screen = pygame.display.set_mode((grid_width * CELL_SIZE, grid_height * CELL_SIZE))
+    cell_size = CELL_SIZE
+    screen = make_screen(grid_width, grid_height, cell_size)
     pygame.display.set_caption("Evacuation Simulation")
     clock = pygame.time.Clock()
+
+    agents = []   
+    running_sim = False  
+    mode = MODE_AGENT  
 
     # Create a 2D list initialized to EMPTY
     grid = [[EMPTY for _ in range(grid_width)] for _ in range(grid_height)]
