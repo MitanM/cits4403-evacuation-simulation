@@ -41,7 +41,14 @@ def main():
             if event.type == pygame.QUIT:
                 running = False 
 
-        
+        screen.fill(WHITE)
+        for y in range(grid_height):
+            for x in range(grid_width):
+                rect = pygame.Rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+                pygame.draw.rect(screen, WHITE, rect)
+                pygame.draw.rect(screen, GRAY, rect, 1)
+
+
         pygame.display.flip()
         clock.tick(FPS)
 
