@@ -109,10 +109,19 @@ def main():
         screen.fill(WHITE)
         for y in range(grid_height):
             for x in range(grid_width):
-                rect = pygame.Rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
-                pygame.draw.rect(screen, WHITE, rect)
+                rect = pygame.Rect(x * cell_size, y * cell_size, cell_size, cell_size)
+                cell = grid[y][x]
+                if cell == WALL:
+                    pygame.draw.rect(screen, BLACK, rect)
+                elif cell == EXIT:
+                    pygame.draw.rect(screen, GREEN, rect)
+                else:
+                    pygame.draw.rect(screen, WHITE, rect)
                 pygame.draw.rect(screen, GRAY, rect, 1)
-
+        
+        for (ax, ay) in agents:
+            rect = pygame.Rect(ax * cell_size, ay * cell_size, cell_size, cell_size)
+            pygame.draw.rect(screen, BLUE, rect)
 
         pygame.display.flip()
         clock.tick(FPS)
