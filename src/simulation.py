@@ -57,6 +57,31 @@ def main():
             if event.type == pygame.QUIT:
                 running = False 
 
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_1:
+                    mode = MODE_WALL
+                elif event.key == pygame.K_2:
+                    mode = MODE_AGENT
+                elif event.key == pygame.K_3:
+                    mode = MODE_EXIT
+                elif event.key == pygame.K_SPACE:
+                    running_sim = not running_sim
+                elif event.key == pygame.K_r:
+                    grid = [[EMPTY for _ in range(grid_width)] for _ in range(grid_height)]
+                    agents = []
+                    running_sim = False
+                    mode = MODE_AGENT
+                elif event.key in (pygame.K_EQUALS, pygame.K_PLUS):
+                    # zoom in 
+                    cell_size = min(100, cell_size + 5)
+                    screen = make_screen(grid_width, grid_height, cell_size)
+                elif event.key == pygame.K_MINUS:
+                    # zoom out 
+                    cell_size = max(5, cell_size - 5)
+                    screen = make_screen(grid_width, grid_height, cell_size)
+
+
+
         screen.fill(WHITE)
         for y in range(grid_height):
             for x in range(grid_width):
