@@ -80,6 +80,30 @@ def main():
                     cell_size = max(5, cell_size - 5)
                     screen = make_screen(grid_width, grid_height, cell_size)
 
+            elif event.type == pygame.MOUSEBUTTONDOWN and not running_sim:
+                mx, my = pygame.mouse.get_pos()
+                gx, gy = mx // cell_size, my // cell_size
+                if not in_bounds(gx, gy, grid_width, grid_height):
+                    continue
+
+                if mode == MODE_WALL:
+                    if (gx, gy) in agents:
+                        pass  # ignore wall placement if agent is there
+                    else:
+                        grid[gy][gx] = EMPTY if grid[gy][gx] == WALL else WALL
+
+                elif mode == MODE_EXIT:
+                    if grid[gy][gx] == WALL:
+                        pass
+                    else:
+                        grid[gy][gx] = EMPTY if grid[gy][gx] == EXIT else EXIT
+
+                elif mode == MODE_AGENT:
+                    if grid[gy][gx] != WALL:
+                        if (gx, gy) in agents:
+                            agents.remove((gx, gy))
+                        else:
+                            agents.append((gx, gy))
 
 
         screen.fill(WHITE)
