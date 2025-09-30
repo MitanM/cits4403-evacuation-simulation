@@ -116,6 +116,8 @@ def main():
                         pass  # ignore wall placement if agent is there
                     else:
                         grid[gy][gx] = EMPTY if grid[gy][gx] == WALL else WALL
+                        if exits:
+                            dist_map = compute_distance_map(exits, grid, grid_width, grid_height)
 
                 elif mode == MODE_EXIT:
                     if grid[gy][gx] == WALL:
@@ -150,23 +152,23 @@ def main():
                 
                 best_move = None
                 best_dist = dist_map[ay][ax]
-        
+
                 for dx, dy in [(1,0), (-1,0), (0,1), (0,-1)]:
                     nx, ny = ax + dx, ay + dy
                     if in_bounds(nx, ny, grid_width, grid_height):
                         if grid[ny][nx] != WALL and dist_map[ny][nx] < best_dist:
                             best_dist = dist_map[ny][nx]
                             best_move = (nx, ny)
-        
+
                 # Move if a valid neighbor was found, otherwise stay
                 if best_move is not None:
                     new_agents.append(best_move)
                 else:
                     new_agents.append((ax, ay))
-        
+
             agents = new_agents
-        
-        
+
+
         screen.fill(WHITE)
         for y in range(grid_height):
             for x in range(grid_width):
