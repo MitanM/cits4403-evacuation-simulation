@@ -1,5 +1,7 @@
 import pygame 
 import sys 
+from collections import deque
+
 
 # --- Config ---
 CELL_SIZE = 20 # pixels per grid cell, needs to be zoomable later
@@ -25,6 +27,27 @@ def make_screen(grid_w, grid_h, cell_size):
 def in_bounds(x, y, grid_w, grid_h):
     return 0 <= x < grid_w and 0 <= y < grid_h
 
+def compute_distance_map(exits, grid, grid_width, grid_height):
+    """Return a 2D array of shortest distances from each cell to the nearest exit."""
+    INF = float("inf")
+    dist_map = [[INF for _ in range(grid_width)] for _ in range(grid_height)]
+    q = deque()
+
+    # Start BFS from all exits
+    for (ex, ey) in exits:
+        dist_map[ey][ex] = 0
+        q.append((ex, ey))
+
+    while q:
+        x, y = q.popleft()
+        for dx, dy in [(1,0),(-1,0),(0,1),(0,-1)]:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < grid_width and 0 <= ny < grid_height:
+                if grid[ny][nx] != WALL and dist_map[ny][nx] == INF:
+                    dist_map[ny][nx] = dist_map[y][x] + 1
+                    q.append((nx, ny))
+    return dist_map
+
 
 def main():
     pygame.init() 
@@ -45,6 +68,8 @@ def main():
     clock = pygame.time.Clock()
 
     agents = []   
+    exits = []
+    dist_map = None
     running_sim = False  
     mode = MODE_AGENT  
 
@@ -96,7 +121,14 @@ def main():
                     if grid[gy][gx] == WALL:
                         pass
                     else:
-                        grid[gy][gx] = EMPTY if grid[gy][gx] == EXIT else EXIT
+                        if grid[gy][gx] == EXIT:
+                            grid[gy][gx] = EMPTY
+                            if (gx, gy) in exits:
+                                exits.remove((gx, gy))
+                        else:
+                            grid[gy][gx] = EXIT
+                            exits.append((gx, gy))
+                        dist_map = compute_distance_map(exits, grid, grid_width, grid_height)
 
                 elif mode == MODE_AGENT:
                     if grid[gy][gx] != WALL:
@@ -105,7 +137,36 @@ def main():
                         else:
                             agents.append((gx, gy))
 
-
+        if running_sim and dist_map is not None:
+            new_agents = []
+            for (ax, ay) in agents:
+                if grid[ay][ax] == EXIT:
+                    continue  # agent leaves grid
+                
+                # If this cell has no path (INF), agent is stuck
+                if dist_map[ay][ax] == float("inf"):
+                    new_agents.append((ax, ay))
+                    continue
+                
+                best_move = None
+                best_dist = dist_map[ay][ax]
+        
+                for dx, dy in [(1,0), (-1,0), (0,1), (0,-1)]:
+                    nx, ny = ax + dx, ay + dy
+                    if in_bounds(nx, ny, grid_width, grid_height):
+                        if grid[ny][nx] != WALL and dist_map[ny][nx] < best_dist:
+                            best_dist = dist_map[ny][nx]
+                            best_move = (nx, ny)
+        
+                # Move if a valid neighbor was found, otherwise stay
+                if best_move is not None:
+                    new_agents.append(best_move)
+                else:
+                    new_agents.append((ax, ay))
+        
+            agents = new_agents
+        
+        
         screen.fill(WHITE)
         for y in range(grid_height):
             for x in range(grid_width):
