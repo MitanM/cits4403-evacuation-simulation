@@ -52,6 +52,34 @@ def compute_distance_map(exits, grid, grid_width, grid_height):
                     q.append((nx, ny))
     return dist_map
 
+def spread_fire_and_smoke(grid, grid_width, grid_height, tick):
+    """Spread fire and smoke at different speeds."""
+    if tick % FIRE_SPREAD_DELAY == 0:
+        new_fire = []
+        for y in range(grid_height):
+            for x in range(grid_width):
+                if grid[y][x] == FIRE:
+                    for dx, dy in [(1,0),(-1,0),(0,1),(0,-1)]:
+                        nx, ny = x + dx, y + dy
+                        if 0 <= nx < grid_width and 0 <= ny < grid_height:
+                            if grid[ny][nx] == EMPTY:
+                                new_fire.append((nx, ny))
+        for fx, fy in new_fire:
+            grid[fy][fx] = FIRE
+
+    if tick % SMOKE_SPREAD_DELAY == 0:
+        new_smoke = []
+        for y in range(grid_height):
+            for x in range(grid_width):
+                if grid[y][x] in (FIRE, SMOKE):
+                    for dx, dy in [(1,0),(0,1),(-1,0),(0,-1)]:
+                        nx, ny = x + dx, y + dy
+                        if 0 <= nx < grid_width and 0 <= ny < grid_height:
+                            if grid[ny][nx] == EMPTY:
+                                new_smoke.append((nx, ny))
+        for sx, sy in new_smoke:
+            grid[sy][sx] = SMOKE
+
 
 def main():
     pygame.init() 
@@ -76,6 +104,7 @@ def main():
     dist_map = None
     running_sim = False  
     mode = MODE_AGENT  
+    tick = 0
 
     # Create a 2D list initialized to EMPTY
     grid = [[EMPTY for _ in range(grid_width)] for _ in range(grid_height)]
@@ -93,6 +122,8 @@ def main():
                     mode = MODE_AGENT
                 elif event.key == pygame.K_3:
                     mode = MODE_EXIT
+                elif event.key == pygame.K_4:
+                    mode = MODE_FIRE
                 elif event.key == pygame.K_SPACE:
                     running_sim = not running_sim
                 elif event.key == pygame.K_r:
@@ -144,6 +175,16 @@ def main():
                             agents.remove((gx, gy))
                         else:
                             agents.append((gx, gy))
+                
+                elif mode == MODE_FIRE:
+                    if grid[gy][gx] == FIRE:
+                        grid[gy][gx] = EMPTY
+                    else:
+                        grid[gy][gx] = FIRE
+
+        if running_sim:
+            tick += 1
+            spread_fire_and_smoke(grid, grid_width, grid_height, tick)
 
         if running_sim and dist_map is not None:
             new_agents = []
@@ -184,6 +225,10 @@ def main():
                     pygame.draw.rect(screen, BLACK, rect)
                 elif cell == EXIT:
                     pygame.draw.rect(screen, GREEN, rect)
+                elif cell == FIRE:
+                    pygame.draw.rect(screen, (255, 0, 0), rect)
+                elif cell == SMOKE:
+                    pygame.draw.rect(screen, (120, 120, 120), rect)
                 else:
                     pygame.draw.rect(screen, WHITE, rect)
                 pygame.draw.rect(screen, GRAY, rect, 1)
