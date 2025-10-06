@@ -15,10 +15,14 @@ BLUE = (0, 0, 255)
 GREEN = (0, 255, 0)
 
 # Cell types 
-EMPTY, WALL, EXIT = 0, 1, 2 
+EMPTY, WALL, EXIT, FIRE, SMOKE = 0, 1, 2, 3, 4
 
 # Placement modes
-MODE_WALL, MODE_AGENT, MODE_EXIT = 1, 2, 3
+MODE_WALL, MODE_AGENT, MODE_EXIT, MODE_FIRE = 1, 2, 3, 4
+
+# Fire config
+FIRE_SPREAD_DELAY = 10    # fire spreads every X ticks
+SMOKE_SPREAD_DELAY = 5    # smoke spreads every X ticks
 
 
 def make_screen(grid_w, grid_h, cell_size):
