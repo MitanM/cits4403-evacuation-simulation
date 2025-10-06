@@ -94,6 +94,8 @@ def main():
                 elif event.key == pygame.K_r:
                     grid = [[EMPTY for _ in range(grid_width)] for _ in range(grid_height)]
                     agents = []
+                    exits = []
+                    dist_map = None
                     running_sim = False
                     mode = MODE_AGENT
                 elif event.key in (pygame.K_EQUALS, pygame.K_PLUS):
