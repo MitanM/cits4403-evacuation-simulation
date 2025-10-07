@@ -150,6 +150,20 @@ def main():
                     # zoom out 
                     cell_size = max(5, cell_size - 5)
                     screen = make_screen(grid_width, grid_height, cell_size)
+                
+                # placeholder adjusting agents attributes
+                elif show_menu and selected_agent in agent_data:
+                    if event.key == pygame.K_UP:
+                        agent_data[selected_agent]["panic"] = min(10, agent_data[selected_agent]["panic"] + 1)
+                    elif event.key == pygame.K_DOWN:
+                        agent_data[selected_agent]["panic"] = max(0, agent_data[selected_agent]["panic"] - 1)
+                    elif event.key == pygame.K_RIGHT:
+                        agent_data[selected_agent]["speed"] += 0.1
+                    elif event.key == pygame.K_LEFT:
+                        agent_data[selected_agent]["speed"] = max(0.1, agent_data[selected_agent]["speed"] - 0.1)
+                    elif event.key == pygame.K_ESCAPE:
+                        show_menu = False
+                        selected_agent = None
 
             elif event.type == pygame.MOUSEBUTTONDOWN and not running_sim:
                 mx, my = pygame.mouse.get_pos()
@@ -267,8 +281,27 @@ def main():
         hud_surf = font.render(hud_text, True, BLACK)
         screen.blit(hud_surf, (8, 8))
 
-        pygame.display.flip()
-        clock.tick(FPS)
+
+        #agents info menu
+        if show_menu and selected_agent in agent_data:
+            data = agent_data[selected_agent]
+            menu_x, menu_y = 10, 40
+            pygame.draw.rect(screen, (230, 230, 230), (menu_x, menu_y, 180, 120))
+            pygame.draw.rect(screen, BLACK, (menu_x, menu_y, 180, 120), 2)
+
+            lines = [
+                f"Agent ID: {data['id']}",
+                f"Speed: {data['speed']:.1f}",
+                f"Age: {data['age']}",
+                f"Panic: {data['panic']}",
+                "ESC = Close"
+            ]
+            for i, text in enumerate(lines):
+                surf = font.render(text, True, BLACK)
+                screen.blit(surf, (menu_x + 8, menu_y + 8 + i * 20))
+
+                pygame.display.flip()
+                clock.tick(FPS)
 
     pygame.quit()
     sys.exit()
