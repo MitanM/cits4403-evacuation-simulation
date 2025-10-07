@@ -98,6 +98,7 @@ def main():
     screen = make_screen(grid_width, grid_height, cell_size)
     pygame.display.set_caption("Evacuation Simulation")
     clock = pygame.time.Clock()
+    font = pygame.font.SysFont(None, 22) 
 
     agents = []   
     exits = []
@@ -105,6 +106,7 @@ def main():
     running_sim = False  
     mode = MODE_AGENT  
     tick = 0
+    exited_count = 0
 
     # Create a 2D list initialized to EMPTY
     grid = [[EMPTY for _ in range(grid_width)] for _ in range(grid_height)]
@@ -133,6 +135,7 @@ def main():
                     dist_map = None
                     running_sim = False
                     mode = MODE_AGENT
+                    exited_count = 0
                 elif event.key in (pygame.K_EQUALS, pygame.K_PLUS):
                     # zoom in 
                     cell_size = min(100, cell_size + 5)
@@ -190,6 +193,7 @@ def main():
             new_agents = []
             for (ax, ay) in agents:
                 if grid[ay][ax] == EXIT:
+                    exited_count += 1
                     continue  # agent leaves grid
                 
                 # If this cell has no path (INF), agent is stuck
@@ -236,6 +240,12 @@ def main():
         for (ax, ay) in agents:
             rect = pygame.Rect(ax * cell_size, ay * cell_size, cell_size, cell_size)
             pygame.draw.rect(screen, BLUE, rect)
+
+        # HUD
+        remaining = len(agents)
+        hud_text = f"Exited: {exited_count}   Remaining: {remaining}"
+        hud_surf = font.render(hud_text, True, BLACK)
+        screen.blit(hud_surf, (8, 8))
 
         pygame.display.flip()
         clock.tick(FPS)
