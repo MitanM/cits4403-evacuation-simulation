@@ -171,6 +171,23 @@ def main():
                 if not in_bounds(gx, gy, grid_width, grid_height):
                     continue
 
+                # remove button when menu open
+                if show_menu and selected_agent:
+                    remove_rect = pygame.Rect(10 + 40, 40 + 120, 100, 30)
+                    if remove_rect.collidepoint(mx, my):
+                        if selected_agent in agents:
+                            agents.remove(selected_agent)
+                        if selected_agent in agent_data:
+                            del agent_data[selected_agent]
+                        selected_agent = None
+                        show_menu = False
+                        continue
+                
+                if (gx, gy) in agents:
+                    selected_agent = (gx, gy)
+                    show_menu = True
+                    continue
+
                 if mode == MODE_WALL:
                     if (gx, gy) in agents:
                         pass  # ignore wall placement if agent is there
@@ -215,9 +232,6 @@ def main():
                     else:
                         grid[gy][gx] = FIRE
                 
-                elif (gx, gy) in agents:
-                    selected_agent = (gx, gy)
-                    show_menu = True
 
         if running_sim:
             tick += 1
@@ -299,9 +313,16 @@ def main():
             for i, text in enumerate(lines):
                 surf = font.render(text, True, BLACK)
                 screen.blit(surf, (menu_x + 8, menu_y + 8 + i * 20))
+            
+            # draw remove button
+            remove_rect = pygame.Rect(menu_x + 40, menu_y + 120, 100, 30)
+            pygame.draw.rect(screen, (200, 50, 50), remove_rect)
+            pygame.draw.rect(screen, BLACK, remove_rect, 2)
+            remove_text = font.render("Remove", True, WHITE)
+            screen.blit(remove_text, (remove_rect.x + 18, remove_rect.y + 5))
 
-                pygame.display.flip()
-                clock.tick(FPS)
+        pygame.display.flip()
+        clock.tick(FPS)
 
     pygame.quit()
     sys.exit()
