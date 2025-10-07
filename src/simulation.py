@@ -108,6 +108,12 @@ def main():
     tick = 0
     exited_count = 0
 
+    # Agent data and menu tracking
+    agent_data = {} # {(x, y): {"id": int, "speed": float, "age": int, "panic": int}}
+    selected_agent = None
+    next_agent_id = 1 
+    show_menu = False
+
     # Create a 2D list initialized to EMPTY
     grid = [[EMPTY for _ in range(grid_width)] for _ in range(grid_height)]
 
@@ -176,14 +182,28 @@ def main():
                     if grid[gy][gx] != WALL:
                         if (gx, gy) in agents:
                             agents.remove((gx, gy))
+                            if (gx, gy) in agent_data:
+                                del agent_data[(gx, gy)]
                         else:
                             agents.append((gx, gy))
+                            agent_data[(gx, gy)] = {
+                                "id": next_agent_id,
+                                "speed": 1.0,
+                                "age": 30,
+                                "panic": 5
+                            }
+                            next_agent_id += 1
+
                 
                 elif mode == MODE_FIRE:
                     if grid[gy][gx] == FIRE:
                         grid[gy][gx] = EMPTY
                     else:
                         grid[gy][gx] = FIRE
+                
+                elif (gx, gy) in agents:
+                    selected_agent = (gx, gy)
+                    show_menu = True
 
         if running_sim:
             tick += 1
