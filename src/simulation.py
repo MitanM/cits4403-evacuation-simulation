@@ -1,6 +1,8 @@
 import pygame 
 import sys 
-from collections import deque
+from collections import deque, defaultdict
+import random
+
 
 
 # --- Config ---
@@ -23,7 +25,7 @@ MODE_WALL, MODE_AGENT, MODE_EXIT, MODE_FIRE = 1, 2, 3, 4
 # Fire config
 FIRE_SPREAD_DELAY = 10    # fire spreads every X ticks
 SMOKE_SPREAD_DELAY = 5    # smoke spreads every X ticks
-
+EXIT_CAPACITY_PER_TICK = 1  # max agents that can go through each exit cell per tick
 
 def make_screen(grid_w, grid_h, cell_size):
     return pygame.display.set_mode((grid_w * cell_size, grid_h * cell_size))
@@ -238,33 +240,79 @@ def main():
             spread_fire_and_smoke(grid, grid_width, grid_height, tick)
 
         if running_sim and dist_map is not None:
-            new_agents = []
-            for (ax, ay) in agents:
+            occupied = set(agents)  # cells taken at start of tick
+            normal_targets = defaultdict(list) # stores the agents that want to move into each normal floor cell
+            exit_targets = defaultdict(list) # stores the agents that want to move into each exit cell 
+
+            survivors_idx = set() # agents that will stay in place this tick
+            winners_move = {} # agent_idx -> new (x,y)
+            removed_idx = set() # agents that exit this tick
+
+            # Stage 1: each agent declares an intended move (no stepping into occupied cells) 
+            for idx, (ax, ay) in enumerate(agents):
+                # Agent already on an exit leaves immediately
                 if grid[ay][ax] == EXIT:
                     exited_count += 1
-                    continue  # agent leaves grid
+                    continue
                 
-                # If this cell has no path (INF), agent is stuck
+                # No known path -> wait
                 if dist_map[ay][ax] == float("inf"):
-                    new_agents.append((ax, ay))
+                    survivors_idx.add(idx)
                     continue
                 
                 best_move = None
                 best_dist = dist_map[ay][ax]
-
                 for dx, dy in [(1,0), (-1,0), (0,1), (0,-1)]:
                     nx, ny = ax + dx, ay + dy
                     if in_bounds(nx, ny, grid_width, grid_height):
-                        if grid[ny][nx] != WALL and dist_map[ny][nx] < best_dist:
+                        # crowding rule: cannot move into a cell that is currently occupied
+                        if grid[ny][nx] != WALL and (nx, ny) not in occupied and dist_map[ny][nx] < best_dist:
                             best_dist = dist_map[ny][nx]
                             best_move = (nx, ny)
 
-                # Move if a valid neighbor was found, otherwise stay
-                if best_move is not None:
-                    new_agents.append(best_move)
+                if best_move is None:
+                    survivors_idx.add(idx)
+                    continue
+                
+                # If target is an EXIT cell, propose to exit; else propose normal move
+                if grid[best_move[1]][best_move[0]] == EXIT:
+                    exit_targets[best_move].append(idx)
                 else:
-                    new_agents.append((ax, ay))
+                    normal_targets[best_move].append(idx)
 
+            # Stage 2: resolve conflicts for normal cells (one winner per cell)
+            for target, idxs in normal_targets.items():
+                if len(idxs) == 1:
+                    winners_move[idxs[0]] = target
+                else:
+                    random.shuffle(idxs)
+                    winners_move[idxs[0]] = target
+                    for loser in idxs[1:]:
+                        survivors_idx.add(loser)
+
+            # Stage 3: resolve exits with capacity (queueing at doors)
+            exit_cap_remaining = {e: EXIT_CAPACITY_PER_TICK for e in exits}
+            for exit_pos, idxs in exit_targets.items():
+                random.shuffle(idxs)
+                cap = exit_cap_remaining.get(exit_pos, EXIT_CAPACITY_PER_TICK)
+                winners_to_exit = idxs[:cap]
+                removed_idx.update(winners_to_exit)
+                for loser in idxs[cap:]:
+                    survivors_idx.add(loser)
+
+            # --- Stage 4: build next agent list ---
+            new_agents = []
+            for idx, pos in enumerate(agents):
+                if idx in removed_idx:
+                    continue
+                if idx in winners_move:
+                    new_agents.append(winners_move[idx])
+                elif idx in survivors_idx:
+                    new_agents.append(pos)
+                else:
+                    # agents that were on EXIT already were skipped above (they "left")
+                    pass
+                
             agents = new_agents
 
 
