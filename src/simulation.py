@@ -23,13 +23,13 @@ EMPTY, WALL, EXIT, FIRE, SMOKE = 0, 1, 2, 3, 4
 MODE_WALL, MODE_AGENT, MODE_EXIT, MODE_FIRE = 1, 2, 3, 4
 
 # Fire config
-FIRE_SPREAD_DELAY = 10    # fire spreads every X ticks
-SMOKE_SPREAD_DELAY = 5    # smoke spreads every X ticks
+FIRE_SPREAD_DELAY = 70    # fire spreads every X ticks
+SMOKE_SPREAD_DELAY = 25    # smoke spreads every X ticks
 EXIT_CAPACITY_PER_TICK = 1  # max agents that can go through each exit cell per tick
 
 # Lethality thresholds (ticks spent in hazard)
-SMOKE_LETHAL_TICKS = 30
-FIRE_LETHAL_TICKS  = 10
+SMOKE_LETHAL_TICKS = 4
+FIRE_LETHAL_TICKS  = 2
 
 def make_screen(grid_w, grid_h, cell_size):
     return pygame.display.set_mode((grid_w * cell_size, grid_h * cell_size))
@@ -68,8 +68,9 @@ def spread_fire_and_smoke(grid, grid_width, grid_height, tick):
                     for dx, dy in [(1,0),(-1,0),(0,1),(0,-1)]:
                         nx, ny = x + dx, y + dy
                         if 0 <= nx < grid_width and 0 <= ny < grid_height:
-                            if grid[ny][nx] == EMPTY:
+                            if grid[ny][nx] in (EMPTY, SMOKE):
                                 new_fire.append((nx, ny))
+                                
         for fx, fy in new_fire:
             grid[fy][fx] = FIRE
 
@@ -261,9 +262,34 @@ def main():
             survivors_idx = set() # agents that will stay in place this tick
             winners_move = {} # agent_idx -> new (x,y)
             removed_idx = set() # agents that exit this tick
+            dead_idx = set() # died this tick
+
+            # Stage 0: hazard exposure & deaths (at current positions)
+            for idx, (ax, ay) in enumerate(agents):
+                cell = grid[ay][ax]
+                key = (ax, ay)
+                if key not in exposure:
+                    exposure[key] = {"smoke": 0, "fire": 0}
+
+                # update exposure
+                if cell == FIRE:
+                    exposure[key]["fire"] += 1
+                elif cell == SMOKE:
+                    exposure[key]["smoke"] += 1
+                else:
+                    # safe cell: reset both
+                    exposure[key]["smoke"]= 0
+                    exposure[key]["fire"] = 0
+
+                # check lethality
+                if exposure[key]["fire"] >= FIRE_LETHAL_TICKS or exposure[key]["smoke"] >= SMOKE_LETHAL_TICKS:
+                    dead_idx.add(idx)
 
             # Stage 1: each agent declares an intended move (no stepping into occupied cells) 
             for idx, (ax, ay) in enumerate(agents):
+                if idx in dead_idx:
+                    continue
+
                 # Agent already on an exit leaves immediately
                 if grid[ay][ax] == EXIT:
                     exited_count += 1
@@ -314,20 +340,33 @@ def main():
                 for loser in idxs[cap:]:
                     survivors_idx.add(loser)
 
-            # --- Stage 4: build next agent list ---
-            new_agents = []
+            # Stage 4: build next agents list (this holds agents positions in the next instance) + carry exposure to new coords
+            new_agents   = []
+            new_exposure = {}
             for idx, pos in enumerate(agents):
+                # exited or died this tick
                 if idx in removed_idx:
+                    # remove their exposure entry (old pos)
+                    if pos in exposure:
+                        del exposure[pos]
                     continue
-                if idx in winners_move:
-                    new_agents.append(winners_move[idx])
-                elif idx in survivors_idx:
-                    new_agents.append(pos)
-                else:
-                    # agents that were on EXIT already were skipped above (they "left")
-                    pass
+                if idx in dead_idx:
+                    if pos in exposure:
+                        del exposure[pos]
+                    dead_count += 1
+                    continue
                 
+                # survivors and winners keep their exposure counters
+                new_pos = winners_move[idx] if idx in winners_move else pos
+                new_agents.append(new_pos)
+                # transfer exposure counters from old -> new position key
+                old_exp = exposure.get(pos, {"smoke": 0, "fire": 0})
+                new_exposure[new_pos] = old_exp
+                # clean old key
+                if pos in exposure and pos != new_pos:
+                    del exposure[pos]
             agents = new_agents
+            exposure = new_exposure
 
 
         screen.fill(WHITE)
@@ -335,25 +374,36 @@ def main():
             for x in range(grid_width):
                 rect = pygame.Rect(x * cell_size, y * cell_size, cell_size, cell_size)
                 cell = grid[y][x]
+
+                # Base
                 if cell == WALL:
                     pygame.draw.rect(screen, BLACK, rect)
                 elif cell == EXIT:
                     pygame.draw.rect(screen, GREEN, rect)
-                elif cell == FIRE:
-                    pygame.draw.rect(screen, (255, 0, 0), rect)
-                elif cell == SMOKE:
-                    pygame.draw.rect(screen, (120, 120, 120), rect)
                 else:
                     pygame.draw.rect(screen, WHITE, rect)
+
+                # Smoke overlay (translucent)
+                if cell == SMOKE:
+                    smoke_surf = pygame.Surface((cell_size, cell_size), pygame.SRCALPHA)
+                    smoke_surf.fill((120, 120, 120, 140)) 
+                    screen.blit(smoke_surf, (x * cell_size, y * cell_size))
+
+                # Fire on top (opaque)
+                if cell == FIRE:
+                    pygame.draw.rect(screen, (255, 0, 0), rect)
+
+                # Grid line
                 pygame.draw.rect(screen, GRAY, rect, 1)
+
         
         for (ax, ay) in agents:
             rect = pygame.Rect(ax * cell_size, ay * cell_size, cell_size, cell_size)
             pygame.draw.rect(screen, BLUE, rect)
 
         # HUD
-        remaining = len(agents)
-        hud_text = f"Exited: {exited_count}   Remaining: {remaining}"
+        inside = len(agents)
+        hud_text = f"Inside: {inside}   Exited: {exited_count}   Fatalities: {dead_count}"
         hud_surf = font.render(hud_text, True, BLACK)
         screen.blit(hud_surf, (8, 8))
 
