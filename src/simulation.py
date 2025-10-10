@@ -27,6 +27,10 @@ FIRE_SPREAD_DELAY = 10    # fire spreads every X ticks
 SMOKE_SPREAD_DELAY = 5    # smoke spreads every X ticks
 EXIT_CAPACITY_PER_TICK = 1  # max agents that can go through each exit cell per tick
 
+# Lethality thresholds (ticks spent in hazard)
+SMOKE_LETHAL_TICKS = 30
+FIRE_LETHAL_TICKS  = 10
+
 def make_screen(grid_w, grid_h, cell_size):
     return pygame.display.set_mode((grid_w * cell_size, grid_h * cell_size))
 
@@ -109,6 +113,8 @@ def main():
     mode = MODE_AGENT  
     tick = 0
     exited_count = 0
+    dead_count   = 0
+    exposure     = {}
 
     # Agent data and menu tracking
     agent_data = {} # {(x, y): {"id": int, "speed": float, "age": int, "panic": int}}
@@ -144,6 +150,9 @@ def main():
                     running_sim = False
                     mode = MODE_AGENT
                     exited_count = 0
+                    dead_count = 0
+                    exposure = {}
+
                 elif event.key in (pygame.K_EQUALS, pygame.K_PLUS):
                     # zoom in 
                     cell_size = min(100, cell_size + 5)
@@ -181,6 +190,8 @@ def main():
                             agents.remove(selected_agent)
                         if selected_agent in agent_data:
                             del agent_data[selected_agent]
+                        if selected_agent in exposure:
+                            del exposure[selected_agent]
                         selected_agent = None
                         show_menu = False
                         continue
@@ -217,6 +228,8 @@ def main():
                             agents.remove((gx, gy))
                             if (gx, gy) in agent_data:
                                 del agent_data[(gx, gy)]
+                            if (gx, gy) in exposure:
+                                del exposure[(gx, gy)]
                         else:
                             agents.append((gx, gy))
                             agent_data[(gx, gy)] = {
@@ -225,6 +238,7 @@ def main():
                                 "age": 30,
                                 "panic": 5
                             }
+                            exposure[(gx, gy)] = {"smoke": 0, "fire": 0}
                             next_agent_id += 1
 
                 
