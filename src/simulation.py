@@ -240,7 +240,7 @@ def main():
                                 "id": next_agent_id,
                                 "speed": 1.0,
                                 "age": 30,
-                                "panic": 2
+                                "panic": 1
                             }
                             exposure[(gx, gy)] = {"smoke": 0, "fire": 0}
                             next_agent_id += 1
@@ -296,6 +296,7 @@ def main():
                 # Agent leaves if on exit and wont be added to next agents list
                 if grid[ay][ax] == EXIT:
                     exited_count += 1
+                    removed_idx.add(idx)
                     continue
                 
                 # wait if no known pat
@@ -359,6 +360,7 @@ def main():
                 cap = exit_cap_remaining.get(exit_pos, EXIT_CAPACITY_PER_TICK)
                 winners_to_exit = idxs[:cap]
                 removed_idx.update(winners_to_exit)
+                exited_count += len(winners_to_exit)
                 for loser in idxs[cap:]:
                     survivors_idx.add(loser)
 
