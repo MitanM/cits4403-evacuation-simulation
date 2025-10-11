@@ -240,7 +240,7 @@ def main():
                                 "id": next_agent_id,
                                 "speed": 1.0,
                                 "age": 30,
-                                "panic": 5
+                                "panic": 2
                             }
                             exposure[(gx, gy)] = {"smoke": 0, "fire": 0}
                             next_agent_id += 1
@@ -293,35 +293,54 @@ def main():
                 if idx in dead_idx:
                     continue
 
-                # Agent already on an exit leaves immediately
+                # Agent leaves if on exit and wont be added to next agents list
                 if grid[ay][ax] == EXIT:
                     exited_count += 1
                     continue
                 
-                # No known path -> wait
+                # wait if no known pat
                 if dist_map[ay][ax] == float("inf"):
                     survivors_idx.add(idx)
                     continue
                 
-                best_move = None
-                best_dist = dist_map[ay][ax]
+                # get valid neighbors
+                cands = []
                 for dx, dy in [(1,0), (-1,0), (0,1), (0,-1)]:
                     nx, ny = ax + dx, ay + dy
                     if in_bounds(nx, ny, grid_width, grid_height):
-                        # crowding rule: cannot move into a cell that is currently occupied
-                        if grid[ny][nx] != WALL and (nx, ny) not in occupied and dist_map[ny][nx] < best_dist:
-                            best_dist = dist_map[ny][nx]
-                            best_move = (nx, ny)
+                        if grid[ny][nx] != WALL and (nx, ny) not in occupied:
+                            cands.append((nx, ny))
 
-                if best_move is None:
+                if not cands:
                     survivors_idx.add(idx)
                     continue
                 
-                # If target is an EXIT cell, propose to exit; else propose normal move
-                if grid[best_move[1]][best_move[0]] == EXIT:
-                    exit_targets[best_move].append(idx)
+                # Rank by distance (best first)
+                cands.sort(key=lambda p: dist_map[p[1]][p[0]])
+                best = cands[0]
+                cur_dist = dist_map[ay][ax]
+
+                # panic check, agent has a panic_level / 10 chance to not go the optimal route
+                panic_lvl = agent_data.get((ax, ay), {}).get("panic", 0)
+                panic_prob = panic_lvl / 10.0
+                
+                if len(cands) > 1 and random.random() < panic_prob:
+                    # Panic: pick any non best move
+                    move = random.choice(cands[1:])
                 else:
-                    normal_targets[best_move].append(idx)
+                    # picks best move if improves distance
+                    if dist_map[best[1]][best[0]] < cur_dist:
+                        move = best
+                    else:
+                        # No improving neighbor tehn wait
+                        survivors_idx.add(idx)
+                        continue
+                
+                # add agent to compete for exit cell or normal cell
+                if grid[move[1]][move[0]] == EXIT:
+                    exit_targets[move].append(idx)
+                else:
+                    normal_targets[move].append(idx)
 
             # Stage 2: resolve conflicts for normal cells (one winner per cell)
             for target, idxs in normal_targets.items():
