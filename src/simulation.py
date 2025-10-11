@@ -114,8 +114,11 @@ def main():
     mode = MODE_AGENT  
     tick = 0
     exited_count = 0
-    dead_count   = 0
-    exposure     = {}
+    dead_count = 0
+    exposure = {}
+    agent_data = {} 
+    selected_agent = None
+    show_menu = False
 
     # Agent data and menu tracking
     agent_data = {} # {(x, y): {"id": int, "speed": float, "age": int, "panic": int}}
@@ -341,18 +344,23 @@ def main():
                     survivors_idx.add(loser)
 
             # Stage 4: build next agents list (this holds agents positions in the next instance) + carry exposure to new coords
-            new_agents   = []
+            new_agents = []
             new_exposure = {}
+            new_agent_data = {}
             for idx, pos in enumerate(agents):
                 # exited or died this tick
                 if idx in removed_idx:
-                    # remove their exposure entry (old pos)
+                    # remove exposure and agent_data at old pos
                     if pos in exposure:
                         del exposure[pos]
+                    if pos in agent_data:
+                        del agent_data[pos]
                     continue
                 if idx in dead_idx:
                     if pos in exposure:
                         del exposure[pos]
+                    if pos in agent_data:
+                        del agent_data[pos]
                     dead_count += 1
                     continue
                 
@@ -365,9 +373,17 @@ def main():
                 # clean old key
                 if pos in exposure and pos != new_pos:
                     del exposure[pos]
+                
+                # transfer agent_data
+                old_data = agent_data.get(pos)
+                if old_data is not None:
+                    new_agent_data[new_pos] = old_data
+                    if pos != new_pos and pos in agent_data:
+                        del agent_data[pos]
+                
             agents = new_agents
             exposure = new_exposure
-
+            agent_data = new_agent_data 
 
         screen.fill(WHITE)
         for y in range(grid_height):
