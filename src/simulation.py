@@ -36,6 +36,16 @@ WALL_INSULATION = 0.3  # Walls conduct heat at 30% rate
 SMOKE_LETHAL_TICKS = 4
 FIRE_LETHAL_TICKS  = 2
 
+# Heat exposure thresholds
+HEAT_THRESHOLDS = [
+    (100, 1),  # 100C+ incapacitates in 1 tick
+    (90, 2),   # 90-99C incapacitates in 2 ticks
+    (80, 2),   # 80-89C incapacitates in 2 ticks
+    (70, 4),   # 70-79C incapacitates in 4 ticks
+    (60, 8),   # 60-69C incapacitates in 8 ticks
+]
+SAFE_TEMP_THRESHOLD = 60.0  # Temperature below which temp exposure resets
+
 def temp_to_color(temp):
     """Convert temperature to color gradient: white -> yellow -> orange -> red"""
     if temp <= AMBIENT_TEMP:
