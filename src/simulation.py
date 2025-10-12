@@ -2,7 +2,8 @@ import pygame
 import sys 
 from collections import deque, defaultdict
 import random
-
+import json
+import os
 
 
 # --- Config ---
@@ -30,6 +31,53 @@ EXIT_CAPACITY_PER_TICK = 1  # max agents that can go through each exit cell per 
 # Lethality thresholds (ticks spent in hazard)
 SMOKE_LETHAL_TICKS = 4
 FIRE_LETHAL_TICKS  = 2
+
+def save_layout(filename, grid, agents, exits, fires):
+    """Save current grid configuration to a JSON file."""
+    layout = {
+        "grid_width": len(grid[0]),
+        "grid_height": len(grid),
+        "walls": [(x, y) for y, row in enumerate(grid) for x, c in enumerate(row) if c == WALL],
+        "exits": exits,
+        "fires": fires,
+        "agents": agents
+    }
+
+    base_dir = os.path.dirname(os.path.dirname(__file__))
+    layouts_dir = os.path.join(base_dir, "data", "layouts")
+    os.makedirs(layouts_dir, exist_ok=True)
+    path = os.path.join(layouts_dir, filename)
+
+    with open(path, "w") as f:
+        json.dump(layout, f, indent=2)
+    print(f"Layout saved to {path}")
+
+
+def load_layout(filename):
+    """Load a layout JSON file and return grid + lists."""
+    base_dir = os.path.dirname(os.path.dirname(__file__))
+    path = os.path.join(base_dir, "data", "layouts", filename)
+
+    with open(path) as f:
+        layout = json.load(f)
+
+    grid_width = layout["grid_width"]
+    grid_height = layout["grid_height"]
+    grid = [[EMPTY for _ in range(grid_width)] for _ in range(grid_height)]
+
+    for (x, y) in layout["walls"]:
+        grid[y][x] = WALL
+    for (x, y) in layout["fires"]:
+        grid[y][x] = FIRE
+    for (x, y) in layout["exits"]:
+        grid[y][x] = EXIT
+
+    agents = [tuple(a) for a in layout["agents"]]
+    exits = [tuple(e) for e in layout["exits"]]
+    fires = [tuple(f) for f in layout["fires"]]
+
+    print(f"Loaded layout: {filename}")
+    return grid, agents, exits, fires
 
 def make_screen(grid_w, grid_h, cell_size):
     return pygame.display.set_mode((grid_w * cell_size, grid_h * cell_size))
@@ -119,6 +167,9 @@ def main():
     agent_data = {} 
     selected_agent = None
     show_menu = False
+    fires = []
+
+    
 
     # Agent data and menu tracking
     agent_data = {} # {(x, y): {"id": int, "speed": float, "age": int, "panic": int}}
@@ -156,6 +207,28 @@ def main():
                     exited_count = 0
                     dead_count = 0
                     exposure = {}
+                
+                elif event.key == pygame.K_s:
+                    save_layout("custom_layout.json", grid, agents, exits, 
+                                [(x, y) for y, row in enumerate(grid) for x, c in enumerate(row) if c == FIRE])
+                elif event.key == pygame.K_l:
+                    try:
+                        grid, agents, exits, fires = load_layout("custom_layout.json")
+                        dist_map = compute_distance_map(exits, grid, grid_width, grid_height)
+                        agent_data = {}
+                        exposure = {}
+                        next_agent_id = 1
+                        for (ax, ay) in agents:
+                            agent_data[(ax, ay)] = {
+                                "id": next_agent_id,
+                                "speed": 1.0,
+                                "age": 30,
+                                "panic": 1
+                            }
+                            exposure[(ax, ay)] = {"smoke": 0, "fire": 0}
+                            next_agent_id += 1
+                    except FileNotFoundError:
+                        print("No layout found in /data/layouts/")
 
                 elif event.key in (pygame.K_EQUALS, pygame.K_PLUS):
                     # zoom in 
