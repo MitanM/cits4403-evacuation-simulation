@@ -222,7 +222,7 @@ def main():
                                 [(x, y) for y, row in enumerate(grid) for x, c in enumerate(row) if c == FIRE])
                 elif event.key == pygame.K_l:
                     try:
-                        grid, agents, exits, fires = load_layout("closeExits_layout.json")
+                        grid, agents, exits, fires = load_layout("DenseCorridor_layout.json")
                         running_sim = False
                         tick = 0
                         exited_count = 0
@@ -240,7 +240,7 @@ def main():
                                 "id": next_agent_id,
                                 "speed": 1.0,
                                 "age": 30,
-                                "panic": 4
+                                "panic": 5
                             }
                             exposure[(ax, ay)] = {"smoke": 0, "fire": 0}
                             next_agent_id += 1
