@@ -25,7 +25,7 @@ MODE_WALL, MODE_AGENT, MODE_EXIT, MODE_FIRE = 1, 2, 3, 4
 
 # Fire config
 FIRE_SPREAD_DELAY = 70    # fire spreads every X ticks
-SMOKE_SPREAD_DELAY = 25    # smoke spreads every X ticks
+SMOKE_SPREAD_DELAY = 18    # smoke spreads every X ticks
 EXIT_CAPACITY_PER_TICK = 1  # max agents that can go through each exit cell per tick
 
 # Lethality thresholds (ticks spent in hazard)
@@ -223,7 +223,7 @@ def main():
                                 "id": next_agent_id,
                                 "speed": 1.0,
                                 "age": 30,
-                                "panic": 1
+                                "panic": 4
                             }
                             exposure[(ax, ay)] = {"smoke": 0, "fire": 0}
                             next_agent_id += 1
