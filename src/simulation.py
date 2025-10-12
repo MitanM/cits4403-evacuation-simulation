@@ -2,8 +2,7 @@ import pygame
 import sys 
 from collections import deque, defaultdict
 import random
-
-
+import numpy as np
 
 # --- Config ---
 CELL_SIZE = 20 # pixels per grid cell, needs to be zoomable later
@@ -27,9 +26,43 @@ FIRE_SPREAD_DELAY = 70    # fire spreads every X ticks
 SMOKE_SPREAD_DELAY = 25    # smoke spreads every X ticks
 EXIT_CAPACITY_PER_TICK = 1  # max agents that can go through each exit cell per tick
 
+# Temperature config
+AMBIENT_TEMP = 20.0  # Celsius
+FIRE_TEMP = 600.0    # Celsius
+THERMAL_DIFFUSIVITY = 0.05  # Heat diffusion coefficient
+WALL_INSULATION = 0.3  # Walls conduct heat at 30% rate
+
 # Lethality thresholds (ticks spent in hazard)
 SMOKE_LETHAL_TICKS = 4
 FIRE_LETHAL_TICKS  = 2
+
+def temp_to_color(temp):
+    """Convert temperature to color gradient: white -> yellow -> orange -> red"""
+    if temp <= AMBIENT_TEMP:
+        return (255, 255, 255)
+    elif temp >= FIRE_TEMP:
+        return (255, 0, 0)
+    
+    # Normalize temperature between ambient and fire
+    norm = (temp - AMBIENT_TEMP) / (FIRE_TEMP - AMBIENT_TEMP)
+    
+    if norm < 0.33:  # White to yellow
+        t = norm / 0.33
+        r = 255
+        g = 255
+        b = int(255 * (1 - t))
+    elif norm < 0.66:  # Yellow to orange
+        t = (norm - 0.33) / 0.33
+        r = 255
+        g = int(255 * (1 - 0.5 * t))
+        b = 0
+    else:  # Orange to red
+        t = (norm - 0.66) / 0.34
+        r = 255
+        g = int(128 * (1 - t))
+        b = 0
+    
+    return (r, g, b)
 
 def make_screen(grid_w, grid_h, cell_size):
     return pygame.display.set_mode((grid_w * cell_size, grid_h * cell_size))
@@ -57,6 +90,44 @@ def compute_distance_map(exits, grid, grid_width, grid_height):
                     dist_map[ny][nx] = dist_map[y][x] + 1
                     q.append((nx, ny))
     return dist_map
+
+def diffuse_temperature(temp_grid, grid, grid_width, grid_height):
+    """Apply heat diffusion using finite difference method."""
+    new_temp = np.copy(temp_grid)
+    
+    for y in range(grid_height):
+        for x in range(grid_width):
+            # Fire cells maintain constant temperature
+            if grid[y][x] == FIRE:
+                new_temp[y, x] = FIRE_TEMP
+                continue
+            
+            # Calculate heat diffusion from neighbors
+            neighbors_sum = 0
+            neighbor_count = 0
+            
+            for dx, dy in [(1,0), (-1,0), (0,1), (0,-1)]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < grid_width and 0 <= ny < grid_height:
+                    # Apply wall insulation factor
+                    if grid[ny][nx] == WALL:
+                        diffusion_factor = THERMAL_DIFFUSIVITY * WALL_INSULATION
+                    else:
+                        diffusion_factor = THERMAL_DIFFUSIVITY
+                    
+                    neighbors_sum += temp_grid[ny, nx] * diffusion_factor
+                    neighbor_count += diffusion_factor
+            
+            if neighbor_count > 0:
+                # Heat diffusion equation with cooling to ambient
+                avg_neighbor_temp = neighbors_sum / neighbor_count
+                new_temp[y, x] = temp_grid[y, x] + (avg_neighbor_temp - temp_grid[y, x])
+                
+                # Natural cooling towards ambient
+                cooling_rate = 0.02
+                new_temp[y, x] += (AMBIENT_TEMP - new_temp[y, x]) * cooling_rate
+    
+    return new_temp
 
 def spread_fire_and_smoke(grid, grid_width, grid_height, tick):
     """Spread fire and smoke at different speeds."""
@@ -103,7 +174,7 @@ def main():
     # Create the window using grid sizes 
     cell_size = CELL_SIZE
     screen = make_screen(grid_width, grid_height, cell_size)
-    pygame.display.set_caption("Evacuation Simulation")
+    pygame.display.set_caption("Evacuation Simulation with Temperature")
     clock = pygame.time.Clock()
     font = pygame.font.SysFont(None, 22) 
 
@@ -119,6 +190,9 @@ def main():
     agent_data = {} 
     selected_agent = None
     show_menu = False
+
+    # Temperature grid
+    temp_grid = np.full((grid_height, grid_width), AMBIENT_TEMP, dtype=float)
 
     # Agent data and menu tracking
     agent_data = {} # {(x, y): {"id": int, "speed": float, "age": int, "panic": int}}
@@ -148,6 +222,7 @@ def main():
                     running_sim = not running_sim
                 elif event.key == pygame.K_r:
                     grid = [[EMPTY for _ in range(grid_width)] for _ in range(grid_height)]
+                    temp_grid = np.full((grid_height, grid_width), AMBIENT_TEMP, dtype=float)
                     agents = []
                     exits = []
                     dist_map = None
@@ -249,13 +324,18 @@ def main():
                 elif mode == MODE_FIRE:
                     if grid[gy][gx] == FIRE:
                         grid[gy][gx] = EMPTY
+                        temp_grid[gy, gx] = AMBIENT_TEMP
                     else:
                         grid[gy][gx] = FIRE
+                        temp_grid[gy, gx] = FIRE_TEMP
                 
 
         if running_sim:
             tick += 1
             spread_fire_and_smoke(grid, grid_width, grid_height, tick)
+            
+            # Update temperature diffusion
+            temp_grid = diffuse_temperature(temp_grid, grid, grid_width, grid_height)
 
         if running_sim and dist_map is not None:
             occupied = set(agents)  # cells taken at start of tick
@@ -412,13 +492,14 @@ def main():
                 rect = pygame.Rect(x * cell_size, y * cell_size, cell_size, cell_size)
                 cell = grid[y][x]
 
-                # Base
+                # Base color based on temperature
                 if cell == WALL:
                     pygame.draw.rect(screen, BLACK, rect)
                 elif cell == EXIT:
                     pygame.draw.rect(screen, GREEN, rect)
                 else:
-                    pygame.draw.rect(screen, WHITE, rect)
+                    temp_color = temp_to_color(temp_grid[y, x])
+                    pygame.draw.rect(screen, temp_color, rect)
 
                 # Smoke overlay (translucent)
                 if cell == SMOKE:
@@ -448,15 +529,19 @@ def main():
         #agents info menu
         if show_menu and selected_agent in agent_data:
             data = agent_data[selected_agent]
+            ax, ay = selected_agent
+            temp_at_agent = temp_grid[ay, ax]
+            
             menu_x, menu_y = 10, 40
-            pygame.draw.rect(screen, (230, 230, 230), (menu_x, menu_y, 180, 120))
-            pygame.draw.rect(screen, BLACK, (menu_x, menu_y, 180, 120), 2)
+            pygame.draw.rect(screen, (230, 230, 230), (menu_x, menu_y, 180, 140))
+            pygame.draw.rect(screen, BLACK, (menu_x, menu_y, 180, 140), 2)
 
             lines = [
                 f"Agent ID: {data['id']}",
                 f"Speed: {data['speed']:.1f}",
                 f"Age: {data['age']}",
                 f"Panic: {data['panic']}",
+                f"Temp: {temp_at_agent:.1f}°C",
                 "ESC = Close"
             ]
             for i, text in enumerate(lines):
@@ -464,7 +549,7 @@ def main():
                 screen.blit(surf, (menu_x + 8, menu_y + 8 + i * 20))
             
             # draw remove button
-            remove_rect = pygame.Rect(menu_x + 40, menu_y + 120, 100, 30)
+            remove_rect = pygame.Rect(menu_x + 40, menu_y + 140, 100, 30)
             pygame.draw.rect(screen, (200, 50, 50), remove_rect)
             pygame.draw.rect(screen, BLACK, remove_rect, 2)
             remove_text = font.render("Remove", True, WHITE)
@@ -479,4 +564,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
