@@ -72,7 +72,7 @@ def load_layout(filename):
     for (x, y) in layout["exits"]:
         grid[y][x] = EXIT
 
-    agents = [tuple(a) for a in layout["agents"]]
+    agents = sorted([tuple(a) for a in layout["agents"]])
     exits = [tuple(e) for e in layout["exits"]]
     fires = [tuple(f) for f in layout["fires"]]
 
@@ -139,6 +139,7 @@ def spread_fire_and_smoke(grid, grid_width, grid_height, tick):
 def main():
     pygame.init() 
 
+    random.seed(42)
     # Ask the user for grid size (weight and height) 
     try: 
         grid_width = int(input("Enter grid width (number of cells): "))
@@ -196,6 +197,14 @@ def main():
                 elif event.key == pygame.K_4:
                     mode = MODE_FIRE
                 elif event.key == pygame.K_SPACE:
+                    if not running_sim:
+                        random.seed(42)
+                        tick = 0
+                        exited_count = 0
+                        dead_count = 0
+                        exposure = {pos: {"smoke": 0, "fire": 0} for pos in agents}
+                        if exits:
+                            dist_map = compute_distance_map(exits, grid, grid_width, grid_height)
                     running_sim = not running_sim
                 elif event.key == pygame.K_r:
                     grid = [[EMPTY for _ in range(grid_width)] for _ in range(grid_height)]
@@ -213,8 +222,16 @@ def main():
                                 [(x, y) for y, row in enumerate(grid) for x, c in enumerate(row) if c == FIRE])
                 elif event.key == pygame.K_l:
                     try:
-                        grid, agents, exits, fires = load_layout("custom_layout.json")
+                        grid, agents, exits, fires = load_layout("closeExits_layout.json")
+                        running_sim = False
+                        tick = 0
+                        exited_count = 0
+                        dead_count = 0
+
+                        random.seed(42)
+
                         dist_map = compute_distance_map(exits, grid, grid_width, grid_height)
+
                         agent_data = {}
                         exposure = {}
                         next_agent_id = 1
@@ -229,6 +246,7 @@ def main():
                             next_agent_id += 1
                     except FileNotFoundError:
                         print("No layout found in /data/layouts/")
+
 
                 elif event.key in (pygame.K_EQUALS, pygame.K_PLUS):
                     # zoom in 
@@ -331,6 +349,7 @@ def main():
             spread_fire_and_smoke(grid, grid_width, grid_height, tick)
 
         if running_sim and dist_map is not None:
+            agents.sort()
             occupied = set(agents)  # cells taken at start of tick
             normal_targets = defaultdict(list) # stores the agents that want to move into each normal floor cell
             exit_targets = defaultdict(list) # stores the agents that want to move into each exit cell 
@@ -417,7 +436,7 @@ def main():
                     normal_targets[move].append(idx)
 
             # Stage 2: resolve conflicts for normal cells (one winner per cell)
-            for target, idxs in normal_targets.items():
+            for target, idxs in sorted(normal_targets.items()):
                 if len(idxs) == 1:
                     winners_move[idxs[0]] = target
                 else:
@@ -428,7 +447,7 @@ def main():
 
             # Stage 3: resolve exits with capacity (queueing at doors)
             exit_cap_remaining = {e: EXIT_CAPACITY_PER_TICK for e in exits}
-            for exit_pos, idxs in exit_targets.items():
+            for exit_pos, idxs in sorted(exit_targets.items()):
                 random.shuffle(idxs)
                 cap = exit_cap_remaining.get(exit_pos, EXIT_CAPACITY_PER_TICK)
                 winners_to_exit = idxs[:cap]
