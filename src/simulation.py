@@ -169,6 +169,8 @@ def main():
     selected_agent = None
     show_menu = False
     fires = []
+    show_global_menu = False
+    global_panic_value = 5  # default value we use
 
     
 
@@ -217,6 +219,9 @@ def main():
                     dead_count = 0
                     exposure = {}
                 
+                elif event.key == pygame.K_m:
+                    show_global_menu = not show_global_menu
+                
                 elif event.key == pygame.K_s:
                     save_layout("custom_layout.json", grid, agents, exits, 
                                 [(x, y) for y, row in enumerate(grid) for x, c in enumerate(row) if c == FIRE])
@@ -256,6 +261,19 @@ def main():
                     # zoom out 
                     cell_size = max(5, cell_size - 5)
                     screen = make_screen(grid_width, grid_height, cell_size)
+                
+                elif show_global_menu:
+                    if event.key == pygame.K_UP or event.key == pygame.K_RIGHT:
+                        global_panic_value = min(10, global_panic_value + 1)
+                    elif event.key == pygame.K_DOWN or event.key == pygame.K_LEFT:
+                        global_panic_value = max(0, global_panic_value - 1)
+                    elif event.key == pygame.K_RETURN:
+                        for pos in agent_data:
+                            agent_data[pos]["panic"] = global_panic_value
+                        print(f"All agents set to panic level {global_panic_value}")
+                        show_global_menu = False
+                    elif event.key == pygame.K_ESCAPE:
+                        show_global_menu = False
                 
                 # placeholder adjusting agents attributes
                 elif show_menu and selected_agent in agent_data:
@@ -535,7 +553,23 @@ def main():
         hud_text = f"Inside: {inside}   Exited: {exited_count}   Fatalities: {dead_count}"
         hud_surf = font.render(hud_text, True, BLACK)
         screen.blit(hud_surf, (8, 8))
+        
+        # global panic and future to be speed menu (activate this by clicking m)
+        if show_global_menu:
+            menu_w, menu_h = 260, 100
+            menu_x = (screen.get_width() - menu_w) // 2
+            menu_y = (screen.get_height() - menu_h) // 2
+            pygame.draw.rect(screen, (230, 230, 230), (menu_x, menu_y, menu_w, menu_h))
+            pygame.draw.rect(screen, BLACK, (menu_x, menu_y, menu_w, menu_h), 2)
 
+            title = font.render("Set Panic Level for All Agents", True, BLACK)
+            screen.blit(title, (menu_x + 15, menu_y + 10))
+
+            val_text = font.render(f"Panic: {global_panic_value}", True, (0, 0, 180))
+            screen.blit(val_text, (menu_x + 90, menu_y + 40))
+
+            hint_text = font.render("up or down arrow to change", True, BLACK)
+            screen.blit(hint_text, (menu_x + 25, menu_y + 70))
 
         #agents info menu
         if show_menu and selected_agent in agent_data:
