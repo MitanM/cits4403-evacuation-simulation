@@ -37,7 +37,7 @@ EXIT_CAPACITY_PER_TICK = 1  # max agents that can go through each exit cell per 
 # Temperature config
 AMBIENT_TEMP = 20.0
 FIRE_TEMP = 600.0
-THERMAL_DIFFUSIVITY = 0.05
+THERMAL_DIFFUSIVITY = 1
 WALL_INSULATION = 0.3
 SAFE_TEMP_THRESHOLD = 50.0
 
@@ -232,6 +232,18 @@ def diffuse_temperature(temp_grid, grid, grid_width, grid_height):
                 new_temp[y, x] = FIRE_TEMP
                 continue
 
+            # Radiant heat from nearby fire cells (spreads to radius 3)
+            max_radiant = AMBIENT_TEMP
+            for dy in range(-3, 4):
+                for dx in range(-3, 4):
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < grid_width and 0 <= ny < grid_height:
+                        if grid[ny][nx] == FIRE:
+                            distance = max(abs(dx), abs(dy))  # Chebyshev distance
+                            radiant_temp = FIRE_TEMP * (1 - (distance / 4.0))  # Falls off with distance
+                            max_radiant = max(max_radiant, radiant_temp)
+
+            # Conductive diffusion to neighbors
             neighbors_sum = 0
             neighbor_count = 0
 
@@ -239,19 +251,23 @@ def diffuse_temperature(temp_grid, grid, grid_width, grid_height):
                 nx, ny = x + dx, y + dy
                 if 0 <= nx < grid_width and 0 <= ny < grid_height:
                     if grid[ny][nx] == WALL:
-                        diffusion_factor = THERMAL_DIFFUSIVITY * WALL_INSULATION
+                        diffusion_factor = 0.05  # Much lower through walls
                     else:
-                        diffusion_factor = THERMAL_DIFFUSIVITY
+                        diffusion_factor = 0.4   # Aggressive neighbor diffusion
 
                     neighbors_sum += temp_grid[ny, nx] * diffusion_factor
                     neighbor_count += diffusion_factor
 
             if neighbor_count > 0:
                 avg_neighbor_temp = neighbors_sum / neighbor_count
-                new_temp[y, x] = temp_grid[y, x] + (avg_neighbor_temp - temp_grid[y, x])
+                new_temp[y, x] = temp_grid[y, x] + (avg_neighbor_temp - temp_grid[y, x]) * 0.7
+            
+            # Apply radiant heat
+            new_temp[y, x] = max(new_temp[y, x], max_radiant)
 
-                cooling_rate = 0.02
-                new_temp[y, x] += (AMBIENT_TEMP - new_temp[y, x]) * cooling_rate
+            # Slow cooling
+            cooling_rate = 0.005
+            new_temp[y, x] += (AMBIENT_TEMP - new_temp[y, x]) * cooling_rate
 
     return new_temp
 
