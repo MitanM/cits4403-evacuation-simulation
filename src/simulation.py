@@ -390,6 +390,21 @@ def main():
                 elif event.key == pygame.K_l:
                     try:
                         grid, agents, exits, fires = load_layout("DenseCorridor_layout.json")
+                        
+                        # Update grid dimensions to match loaded layout
+                        grid_height = len(grid)
+                        grid_width = len(grid[0]) if grid else 0
+                        
+                        # Recreate screen with new dimensions
+                        screen = make_screen(grid_width, grid_height, cell_size)
+                        
+                        # Reinitialize temperature grid with new dimensions
+                        temp_grid = np.full((grid_height, grid_width), AMBIENT_TEMP, dtype=float)
+                        for y in range(grid_height):
+                            for x in range(grid_width):
+                                if grid[y][x] == FIRE:
+                                    temp_grid[y, x] = FIRE_TEMP
+                        
                         running_sim = False
                         tick = 0
                         exited_count = 0
