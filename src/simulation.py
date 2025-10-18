@@ -1,12 +1,12 @@
-import pygame 
-import sys 
+import pygame
+import sys
 from collections import deque, defaultdict
 import random
 import numpy as np
 
 # --- Config ---
-CELL_SIZE = 20 # pixels per grid cell, needs to be zoomable later
-FPS = 10 
+CELL_SIZE = 20
+FPS = 10
 
 # Colors (R, G, B)
 WHITE = (255, 255, 255)
@@ -14,37 +14,110 @@ GRAY = (200, 200, 200)
 BLACK = (0, 0, 0)
 BLUE = (0, 0, 255)
 GREEN = (0, 255, 0)
+ORANGE = (255, 165, 0)
+RED = (255, 0, 0)
 
-# Cell types 
+# Cell types
 EMPTY, WALL, EXIT, FIRE, SMOKE = 0, 1, 2, 3, 4
 
 # Placement modes
 MODE_WALL, MODE_AGENT, MODE_EXIT, MODE_FIRE = 1, 2, 3, 4
 
+# Agent health states
+HEALTHY, INJURED, FATALLY_INJURED, INCAPACITATED = 0, 1, 2, 3
+
 # Fire config
-FIRE_SPREAD_DELAY = 70    # fire spreads every X ticks
-SMOKE_SPREAD_DELAY = 25    # smoke spreads every X ticks
-EXIT_CAPACITY_PER_TICK = 1  # max agents that can go through each exit cell per tick
+FIRE_SPREAD_DELAY = 70
+SMOKE_SPREAD_DELAY = 25
+EXIT_CAPACITY_PER_TICK = 1
 
 # Temperature config
-AMBIENT_TEMP = 20.0  # Celsius
-FIRE_TEMP = 600.0    # Celsius
-THERMAL_DIFFUSIVITY = 0.05  # Heat diffusion coefficient
-WALL_INSULATION = 0.3  # Walls conduct heat at 30% rate
+AMBIENT_TEMP = 20.0
+FIRE_TEMP = 600.0
+THERMAL_DIFFUSIVITY = 0.05
+WALL_INSULATION = 0.3
+SAFE_TEMP_THRESHOLD = 50.0
 
-# Lethality thresholds (ticks spent in hazard)
-SMOKE_LETHAL_TICKS = 4
-FIRE_LETHAL_TICKS  = 2
+# Assumptions for exposure thresholds:
+# Fire and smoke are fully developed instantly for simplicity
+# Model does not include modelling the build up of fire or smoke 
+# Injury occurs at ~33% the time required to incapacitate 
+# Fatal injury occurs at ~67% of the time required to incapacitate
 
-# Heat exposure thresholds
+# Heat exposure thresholds based on ISO 13571
+# Each tuple: (Temperature_C, non_fatal_injury_ticks, fatal_injury_ticks, incapacitation_ticks)
+# Conversion: 12 ticks = 1 simulation minute (10 ticks/sec real-time, 5 sec/tick sim-time)
+# 
+# Based on ISO Equation (10) for convective heat: t_Iconv = (5 × 10^7) × T^(-3.4) minutes
+# This calculates time until occupant cannot take effective action to escape (incapacitation)
+# 
+# Injury progression model:
+# - Non-fatal injury (~33% of incapacitation time): Burns developing, painful but mobile
+# - Fatal injury (~67% of incapacitation time): Severe burns that will cause death later, but adrenaline allows continued movement
+# - Incapacitation (100% of ISO time): Pain/thermal damage so extreme the agent collapses and cannot move
+# 
+# Thresholds assume dry air (<10% water vapor) for simplicity; steam causes faster injury at lower temperatures and would drastically reduce injury and incapacitation times 
+#
 HEAT_THRESHOLDS = [
-    (100, 1),  # 100C+ incapacitates in 1 tick
-    (90, 2),   # 90-99C incapacitates in 2 ticks
-    (80, 2),   # 80-89C incapacitates in 2 ticks
-    (70, 4),   # 70-79C incapacitates in 4 ticks
-    (60, 8),   # 60-69C incapacitates in 8 ticks
+    (50, 240, 480, 720),      # 60 min incap
+    (60, 120, 240, 360),      # 30 min incap
+    (70, 68, 136, 204),       # 17 min incap
+    (80, 40, 80, 120),        # 10 min incap
+    (90, 26, 52, 78),         # 6.5 min incap
+    (100, 16, 32, 48),        # 4 min incap
+    (110, 11, 22, 32),        # 2.7 min incap
+    (120, 8, 16, 24),         # 2 min incap
+    (130, 5, 10, 16),         # 1.3 min incap
+    (140, 4, 8, 12),          # 1 min incap
+    (150, 3, 7, 10),          # 50 sec incap
+    (160, 3, 5, 8),           # 40 sec incap
+    (170, 2, 4, 7),           # 32 sec incap
+    (180, 2, 3, 5),           # 24 sec incap
+    (200, 1, 2, 3),           # 15 sec incap
+    (250, 1, 1, 1),           # 6 sec incap
 ]
-SAFE_TEMP_THRESHOLD = 60.0  # Temperature below which temp exposure resets
+
+# Smoke thresholds: (non_fatal_ticks, fatal_ticks, incapacitation_ticks)
+# Smoke/toxic gas thresholds for fully developed building fire
+# Based on ISO 13571 FED (Fractional Effective Dose) model for asphyxiant gases
+# 
+# Assumes post-flashover fire conditions with high CO (8,000 ppm), CO₂ (8%), and HCN (150 ppm)
+# CO₂ causes hyperventilation, dramatically increasing toxin uptake
+# 
+# ISO calculation: FED accumulates at 4.51 per minute in these conditions
+# - Theoretical incapacitation: ~13 seconds (2.6 ticks)
+# - Adjusted for variable exposure, agent movement, and uncertainty
+# - Values represent continuous exposure to dense smoke in fully developed fire
+#
+# (non_fatal_injury_ticks, fatal_injury_ticks, incapacitation_ticks)
+SMOKE_THRESHOLD = (2, 3, 4)
+
+# Direct fire exposure (flames/fire tiles at 600°C)
+# Agent is standing directly on a fire tile (600°C convective heat + radiant heat from flames)
+# 
+# Based on ISO 13571:
+# Equation (10) for unclothed/lightly clothed: t_Iconv = (5 × 10^7) × T^(-3.4) minutes
+# At 600°C: t = (5 × 10^7) × (600)^(-3.4) = 0.000015 minutes = 0.0009 seconds
+# 
+# Additionally:
+# - ISO notes 120°C causes "considerable pain and burns within minutes"
+# - 600°C is 5× higher than this threshold
+# - Direct flame contact also adds extreme radiant heat (>10 kW/m²)
+# - Respiratory tract experiences immediate thermal burns from superheated air
+# 
+# At 600°C exposure:
+# - All three injury stages (injury/fatal/incapacitation) occur essentially instantly
+# - Severe burns develop in <1 second
+# - Pain causes immediate collapse, shock and inability to move
+# 
+# (non_fatal_injury_ticks, fatal_injury_ticks, incapacitation_ticks)
+DIRECT_FLAME_THRESHOLDS = (1, 1, 1)
+
+def get_heat_thresholds(temp):
+    for threshold_temp, nf_ticks, f_ticks, inc_ticks in HEAT_THRESHOLDS:
+        if temp >= threshold_temp:
+            return (nf_ticks, f_ticks, inc_ticks)
+    return (float('inf'), float('inf'), float('inf'))
 
 def temp_to_color(temp):
     """Convert temperature to color gradient: white -> yellow -> orange -> red"""
@@ -52,26 +125,25 @@ def temp_to_color(temp):
         return (255, 255, 255)
     elif temp >= FIRE_TEMP:
         return (255, 0, 0)
-    
-    # Normalize temperature between ambient and fire
+
     norm = (temp - AMBIENT_TEMP) / (FIRE_TEMP - AMBIENT_TEMP)
-    
-    if norm < 0.33:  # White to yellow
+
+    if norm < 0.33:
         t = norm / 0.33
         r = 255
         g = 255
         b = int(255 * (1 - t))
-    elif norm < 0.66:  # Yellow to orange
+    elif norm < 0.66:
         t = (norm - 0.33) / 0.33
         r = 255
         g = int(255 * (1 - 0.5 * t))
         b = 0
-    else:  # Orange to red
+    else:
         t = (norm - 0.66) / 0.34
         r = 255
         g = int(128 * (1 - t))
         b = 0
-    
+
     return (r, g, b)
 
 def make_screen(grid_w, grid_h, cell_size):
@@ -86,7 +158,6 @@ def compute_distance_map(exits, grid, grid_width, grid_height):
     dist_map = [[INF for _ in range(grid_width)] for _ in range(grid_height)]
     q = deque()
 
-    # Start BFS from all exits
     for (ex, ey) in exits:
         dist_map[ey][ex] = 0
         q.append((ex, ey))
@@ -104,39 +175,34 @@ def compute_distance_map(exits, grid, grid_width, grid_height):
 def diffuse_temperature(temp_grid, grid, grid_width, grid_height):
     """Apply heat diffusion using finite difference method."""
     new_temp = np.copy(temp_grid)
-    
+
     for y in range(grid_height):
         for x in range(grid_width):
-            # Fire cells maintain constant temperature
             if grid[y][x] == FIRE:
                 new_temp[y, x] = FIRE_TEMP
                 continue
-            
-            # Calculate heat diffusion from neighbors
+
             neighbors_sum = 0
             neighbor_count = 0
-            
+
             for dx, dy in [(1,0), (-1,0), (0,1), (0,-1)]:
                 nx, ny = x + dx, y + dy
                 if 0 <= nx < grid_width and 0 <= ny < grid_height:
-                    # Apply wall insulation factor
                     if grid[ny][nx] == WALL:
                         diffusion_factor = THERMAL_DIFFUSIVITY * WALL_INSULATION
                     else:
                         diffusion_factor = THERMAL_DIFFUSIVITY
-                    
+
                     neighbors_sum += temp_grid[ny, nx] * diffusion_factor
                     neighbor_count += diffusion_factor
-            
+
             if neighbor_count > 0:
-                # Heat diffusion equation with cooling to ambient
                 avg_neighbor_temp = neighbors_sum / neighbor_count
                 new_temp[y, x] = temp_grid[y, x] + (avg_neighbor_temp - temp_grid[y, x])
-                
-                # Natural cooling towards ambient
+
                 cooling_rate = 0.02
                 new_temp[y, x] += (AMBIENT_TEMP - new_temp[y, x]) * cooling_rate
-    
+
     return new_temp
 
 def spread_fire_and_smoke(grid, grid_width, grid_height, tick):
@@ -151,7 +217,7 @@ def spread_fire_and_smoke(grid, grid_width, grid_height, tick):
                         if 0 <= nx < grid_width and 0 <= ny < grid_height:
                             if grid[ny][nx] in (EMPTY, SMOKE):
                                 new_fire.append((nx, ny))
-                                
+
         for fx, fy in new_fire:
             grid[fy][fx] = FIRE
 
@@ -170,54 +236,53 @@ def spread_fire_and_smoke(grid, grid_width, grid_height, tick):
 
 
 def main():
-    pygame.init() 
+    pygame.init()
 
-    # Ask the user for grid size (weight and height) 
-    try: 
+    try:
         grid_width = int(input("Enter grid width (number of cells): "))
         grid_height = int(input("Enter grid height (number of cells): "))
     except ValueError:
         print("Invalid input, using default 30x20)")
         grid_width = 30
         grid_height = 20
-    
-    # Create the window using grid sizes 
+
     cell_size = CELL_SIZE
     screen = make_screen(grid_width, grid_height, cell_size)
     pygame.display.set_caption("Evacuation Simulation with Temperature")
     clock = pygame.time.Clock()
-    font = pygame.font.SysFont(None, 22) 
+    font = pygame.font.SysFont(None, 22)
 
-    agents = []   
+    agents = []
     exits = []
     dist_map = None
-    running_sim = False  
-    mode = MODE_AGENT  
+    running_sim = False
+    mode = MODE_AGENT
     tick = 0
     exited_count = 0
-    dead_count = 0
+    exited_injured_count = 0
+    exited_fatally_injured_count = 0
+    incapacitated_count = 0
     exposure = {}
-    agent_data = {} 
+    agent_data = {}
+    agent_health = {}
+    heat_exposure_ticks = {}
     selected_agent = None
     show_menu = False
 
-    # Temperature grid
     temp_grid = np.full((grid_height, grid_width), AMBIENT_TEMP, dtype=float)
 
-    # Agent data and menu tracking
-    agent_data = {} # {(x, y): {"id": int, "speed": float, "age": int, "panic": int}}
+    agent_data = {}
     selected_agent = None
-    next_agent_id = 1 
+    next_agent_id = 1
     show_menu = False
 
-    # Create a 2D list initialized to EMPTY
     grid = [[EMPTY for _ in range(grid_width)] for _ in range(grid_height)]
 
-    running = True 
+    running = True
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                running = False 
+                running = False
 
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_1:
@@ -229,6 +294,18 @@ def main():
                 elif event.key == pygame.K_4:
                     mode = MODE_FIRE
                 elif event.key == pygame.K_SPACE:
+                    if not running_sim:
+                        random.seed(42)
+                        tick = 0
+                        exited_count = 0
+                        exited_injured_count = 0
+                        exited_fatally_injured_count = 0
+                        incapacitated_count = 0
+                        exposure = {pos: {"smoke": 0, "fire": 0} for pos in agents}
+                        agent_health = {pos: HEALTHY for pos in agents}
+                        heat_exposure_ticks = {pos: 0 for pos in agents}
+                        if exits:
+                            dist_map = compute_distance_map(exits, grid, grid_width, grid_height)
                     running_sim = not running_sim
                 elif event.key == pygame.K_r:
                     grid = [[EMPTY for _ in range(grid_width)] for _ in range(grid_height)]
@@ -238,20 +315,23 @@ def main():
                     dist_map = None
                     running_sim = False
                     mode = MODE_AGENT
+                    tick = 0
                     exited_count = 0
-                    dead_count = 0
+                    exited_injured_count = 0
+                    exited_fatally_injured_count = 0
+                    incapacitated_count = 0
                     exposure = {}
+                    agent_data = {}
+                    agent_health = {}
+                    heat_exposure_ticks = {}
 
                 elif event.key in (pygame.K_EQUALS, pygame.K_PLUS):
-                    # zoom in 
                     cell_size = min(100, cell_size + 5)
                     screen = make_screen(grid_width, grid_height, cell_size)
                 elif event.key == pygame.K_MINUS:
-                    # zoom out 
                     cell_size = max(5, cell_size - 5)
                     screen = make_screen(grid_width, grid_height, cell_size)
-                
-                # placeholder adjusting agents attributes
+
                 elif show_menu and selected_agent in agent_data:
                     if event.key == pygame.K_UP:
                         agent_data[selected_agent]["panic"] = min(10, agent_data[selected_agent]["panic"] + 1)
@@ -271,9 +351,8 @@ def main():
                 if not in_bounds(gx, gy, grid_width, grid_height):
                     continue
 
-                # remove button when menu open
                 if show_menu and selected_agent:
-                    remove_rect = pygame.Rect(10 + 40, 40 + 120, 100, 30)
+                    remove_rect = pygame.Rect(10 + 40, 40 + 160, 100, 30)
                     if remove_rect.collidepoint(mx, my):
                         if selected_agent in agents:
                             agents.remove(selected_agent)
@@ -281,10 +360,14 @@ def main():
                             del agent_data[selected_agent]
                         if selected_agent in exposure:
                             del exposure[selected_agent]
+                        if selected_agent in agent_health:
+                            del agent_health[selected_agent]
+                        if selected_agent in heat_exposure_ticks:
+                            del heat_exposure_ticks[selected_agent]
                         selected_agent = None
                         show_menu = False
                         continue
-                
+
                 if (gx, gy) in agents:
                     selected_agent = (gx, gy)
                     show_menu = True
@@ -292,7 +375,7 @@ def main():
 
                 if mode == MODE_WALL:
                     if (gx, gy) in agents:
-                        pass  # ignore wall placement if agent is there
+                        pass
                     else:
                         grid[gy][gx] = EMPTY if grid[gy][gx] == WALL else WALL
                         if exits:
@@ -319,6 +402,10 @@ def main():
                                 del agent_data[(gx, gy)]
                             if (gx, gy) in exposure:
                                 del exposure[(gx, gy)]
+                            if (gx, gy) in agent_health:
+                                del agent_health[(gx, gy)]
+                            if (gx, gy) in heat_exposure_ticks:
+                                del heat_exposure_ticks[(gx, gy)]
                         else:
                             agents.append((gx, gy))
                             agent_data[(gx, gy)] = {
@@ -328,9 +415,10 @@ def main():
                                 "panic": 1
                             }
                             exposure[(gx, gy)] = {"smoke": 0, "fire": 0}
+                            agent_health[(gx, gy)] = HEALTHY
+                            heat_exposure_ticks[(gx, gy)] = 0
                             next_agent_id += 1
 
-                
                 elif mode == MODE_FIRE:
                     if grid[gy][gx] == FIRE:
                         grid[gy][gx] = EMPTY
@@ -338,63 +426,110 @@ def main():
                     else:
                         grid[gy][gx] = FIRE
                         temp_grid[gy, gx] = FIRE_TEMP
-                
 
         if running_sim:
             tick += 1
             spread_fire_and_smoke(grid, grid_width, grid_height, tick)
-            
-            # Update temperature diffusion
             temp_grid = diffuse_temperature(temp_grid, grid, grid_width, grid_height)
 
         if running_sim and dist_map is not None:
-            occupied = set(agents)  # cells taken at start of tick
-            normal_targets = defaultdict(list) # stores the agents that want to move into each normal floor cell
-            exit_targets = defaultdict(list) # stores the agents that want to move into each exit cell 
+            occupied = set(agents)
+            normal_targets = defaultdict(list)
+            exit_targets = defaultdict(list)
 
-            survivors_idx = set() # agents that will stay in place this tick
-            winners_move = {} # agent_idx -> new (x,y)
-            removed_idx = set() # agents that exit this tick
-            dead_idx = set() # died this tick
+            survivors_idx = set()
+            winners_move = {}
+            removed_idx = set()
+            incapacitated_idx = set()
 
-            # Stage 0: hazard exposure & deaths (at current positions)
+            # Stage 0: hazard exposure & injury determination (at current positions)
             for idx, (ax, ay) in enumerate(agents):
                 cell = grid[ay][ax]
+                temp = temp_grid[ay, ax]
                 key = (ax, ay)
+
                 if key not in exposure:
                     exposure[key] = {"smoke": 0, "fire": 0}
+                if key not in agent_health:
+                    agent_health[key] = HEALTHY
+                if key not in heat_exposure_ticks:
+                    heat_exposure_ticks[key] = 0
 
-                # update exposure
+                # Update exposure counters for smoke and fire
                 if cell == FIRE:
                     exposure[key]["fire"] += 1
+                    exposure[key]["smoke"] = 0
                 elif cell == SMOKE:
                     exposure[key]["smoke"] += 1
+                    exposure[key]["fire"] = 0
                 else:
-                    # safe cell: reset both
-                    exposure[key]["smoke"]= 0
+                    exposure[key]["smoke"] = 0
                     exposure[key]["fire"] = 0
 
-                # check lethality
-                if exposure[key]["fire"] >= FIRE_LETHAL_TICKS or exposure[key]["smoke"] >= SMOKE_LETHAL_TICKS:
-                    dead_idx.add(idx)
+                # Track continuous heat exposure
+                if temp >= SAFE_TEMP_THRESHOLD:
+                    heat_exposure_ticks[key] += 1
+                else:
+                    heat_exposure_ticks[key] = 0
 
-            # Stage 1: each agent declares an intended move (no stepping into occupied cells) 
+                health = agent_health[key]
+
+                if health == INCAPACITATED:
+                    continue
+
+                # Check direct flame (FIRE cell)
+                if cell == FIRE:
+                    nf_flame, f_flame, inc_flame = DIRECT_FLAME_THRESHOLDS
+
+                    if exposure[key]["fire"] >= inc_flame and health != INCAPACITATED:
+                        agent_health[key] = INCAPACITATED
+                        incapacitated_idx.add(idx)
+                        continue
+                    elif exposure[key]["fire"] >= f_flame and health in (HEALTHY, INJURED):
+                        agent_health[key] = FATALLY_INJURED
+                    elif exposure[key]["fire"] >= nf_flame and health == HEALTHY:
+                        agent_health[key] = INJURED
+
+                # Check smoke
+                nf_smoke, f_smoke, inc_smoke = SMOKE_THRESHOLD
+
+                if exposure[key]["smoke"] >= inc_smoke and health != INCAPACITATED:
+                    agent_health[key] = INCAPACITATED
+                    incapacitated_idx.add(idx)
+                    continue
+                elif exposure[key]["smoke"] >= f_smoke and health in (HEALTHY, INJURED):
+                    agent_health[key] = FATALLY_INJURED
+                elif exposure[key]["smoke"] >= nf_smoke and health == HEALTHY:
+                    agent_health[key] = INJURED
+
+                # Check heat - progressive with continuous exposure tracking
+                nf_heat, f_heat, inc_heat = get_heat_thresholds(temp)
+                heat_ticks = heat_exposure_ticks[key]
+
+                if heat_ticks >= inc_heat and health != INCAPACITATED:
+                    agent_health[key] = INCAPACITATED
+                    incapacitated_idx.add(idx)
+                    continue
+                elif heat_ticks >= f_heat and health in (HEALTHY, INJURED):
+                    agent_health[key] = FATALLY_INJURED
+                elif heat_ticks >= nf_heat and health == HEALTHY:
+                    agent_health[key] = INJURED
+
+            # Stage 1: each agent declares an intended move
             for idx, (ax, ay) in enumerate(agents):
-                if idx in dead_idx:
+                if idx in incapacitated_idx:
+                    survivors_idx.add(idx)
                     continue
 
-                # Agent leaves if on exit and wont be added to next agents list
                 if grid[ay][ax] == EXIT:
-                    exited_count += 1
-                    removed_idx.add(idx)
+                    exit_pos = (ax, ay)
+                    exit_targets[exit_pos].append(idx)
                     continue
-                
-                # wait if no known pat
+
                 if dist_map[ay][ax] == float("inf"):
                     survivors_idx.add(idx)
                     continue
-                
-                # get valid neighbors
+
                 cands = []
                 for dx, dy in [(1,0), (-1,0), (0,1), (0,-1)]:
                     nx, ny = ax + dx, ay + dy
@@ -405,29 +540,23 @@ def main():
                 if not cands:
                     survivors_idx.add(idx)
                     continue
-                
-                # Rank by distance (best first)
+
                 cands.sort(key=lambda p: dist_map[p[1]][p[0]])
                 best = cands[0]
                 cur_dist = dist_map[ay][ax]
 
-                # panic check, agent has a panic_level / 10 chance to not go the optimal route
                 panic_lvl = agent_data.get((ax, ay), {}).get("panic", 0)
                 panic_prob = panic_lvl / 10.0
-                
+
                 if len(cands) > 1 and random.random() < panic_prob:
-                    # Panic: pick any non best move
                     move = random.choice(cands[1:])
                 else:
-                    # picks best move if improves distance
                     if dist_map[best[1]][best[0]] < cur_dist:
                         move = best
                     else:
-                        # No improving neighbor tehn wait
                         survivors_idx.add(idx)
                         continue
-                
-                # add agent to compete for exit cell or normal cell
+
                 if grid[move[1]][move[0]] == EXIT:
                     exit_targets[move].append(idx)
                 else:
@@ -451,50 +580,72 @@ def main():
                 winners_to_exit = idxs[:cap]
                 removed_idx.update(winners_to_exit)
                 exited_count += len(winners_to_exit)
+                for winner_idx in winners_to_exit:
+                    health_state = agent_health.get(agents[winner_idx], HEALTHY)
+                    if health_state == INJURED:
+                        exited_injured_count += 1
+                    elif health_state == FATALLY_INJURED:
+                        exited_fatally_injured_count += 1
                 for loser in idxs[cap:]:
                     survivors_idx.add(loser)
 
-            # Stage 4: build next agents list (this holds agents positions in the next instance) + carry exposure to new coords
+            # Stage 4: build next agents list + carry exposure and health to new coords
             new_agents = []
             new_exposure = {}
             new_agent_data = {}
+            new_agent_health = {}
+            new_heat_exposure_ticks = {}
             for idx, pos in enumerate(agents):
-                # exited or died this tick
                 if idx in removed_idx:
-                    # remove exposure and agent_data at old pos
                     if pos in exposure:
                         del exposure[pos]
                     if pos in agent_data:
                         del agent_data[pos]
+                    if pos in agent_health:
+                        del agent_health[pos]
+                    if pos in heat_exposure_ticks:
+                        del heat_exposure_ticks[pos]
                     continue
-                if idx in dead_idx:
+                if idx in incapacitated_idx:
                     if pos in exposure:
                         del exposure[pos]
                     if pos in agent_data:
                         del agent_data[pos]
-                    dead_count += 1
+                    if pos in agent_health:
+                        del agent_health[pos]
+                    if pos in heat_exposure_ticks:
+                        del heat_exposure_ticks[pos]
+                    incapacitated_count += 1
                     continue
-                
-                # survivors and winners keep their exposure counters
+
                 new_pos = winners_move[idx] if idx in winners_move else pos
                 new_agents.append(new_pos)
-                # transfer exposure counters from old -> new position key
                 old_exp = exposure.get(pos, {"smoke": 0, "fire": 0})
                 new_exposure[new_pos] = old_exp
-                # clean old key
                 if pos in exposure and pos != new_pos:
                     del exposure[pos]
-                
-                # transfer agent_data
+
                 old_data = agent_data.get(pos)
                 if old_data is not None:
                     new_agent_data[new_pos] = old_data
                     if pos != new_pos and pos in agent_data:
                         del agent_data[pos]
-                
+
+                old_health = agent_health.get(pos, HEALTHY)
+                new_agent_health[new_pos] = old_health
+                if pos in agent_health and pos != new_pos:
+                    del agent_health[pos]
+
+                old_heat_ticks = heat_exposure_ticks.get(pos, 0)
+                new_heat_exposure_ticks[new_pos] = old_heat_ticks
+                if pos in heat_exposure_ticks and pos != new_pos:
+                    del heat_exposure_ticks[pos]
+
             agents = new_agents
             exposure = new_exposure
-            agent_data = new_agent_data 
+            agent_data = new_agent_data
+            agent_health = new_agent_health
+            heat_exposure_ticks = new_heat_exposure_ticks
 
         screen.fill(WHITE)
         for y in range(grid_height):
@@ -502,7 +653,6 @@ def main():
                 rect = pygame.Rect(x * cell_size, y * cell_size, cell_size, cell_size)
                 cell = grid[y][x]
 
-                # Base color based on temperature
                 if cell == WALL:
                     pygame.draw.rect(screen, BLACK, rect)
                 elif cell == EXIT:
@@ -511,55 +661,71 @@ def main():
                     temp_color = temp_to_color(temp_grid[y, x])
                     pygame.draw.rect(screen, temp_color, rect)
 
-                # Smoke overlay (translucent)
                 if cell == SMOKE:
                     smoke_surf = pygame.Surface((cell_size, cell_size), pygame.SRCALPHA)
-                    smoke_surf.fill((120, 120, 120, 140)) 
+                    smoke_surf.fill((120, 120, 120, 140))
                     screen.blit(smoke_surf, (x * cell_size, y * cell_size))
 
-                # Fire on top (opaque)
                 if cell == FIRE:
                     pygame.draw.rect(screen, (255, 0, 0), rect)
 
-                # Grid line
                 pygame.draw.rect(screen, GRAY, rect, 1)
 
-        
         for (ax, ay) in agents:
             rect = pygame.Rect(ax * cell_size, ay * cell_size, cell_size, cell_size)
-            pygame.draw.rect(screen, BLUE, rect)
+            health = agent_health.get((ax, ay), HEALTHY)
+
+            if health == HEALTHY:
+                color = BLUE
+            elif health == INJURED:
+                color = ORANGE
+            elif health == FATALLY_INJURED:
+                color = RED
+            elif health == INCAPACITATED:
+                color = (128, 0, 128)
+
+            pygame.draw.rect(screen, color, rect)
 
         # HUD
         inside = len(agents)
-        hud_text = f"Inside: {inside}   Exited: {exited_count}   Fatalities: {dead_count}"
+        hud_text = f"Inside: {inside}   Exited: {exited_count}   Injured: {exited_injured_count}   Fatal: {exited_fatally_injured_count}   Casualties: {incapacitated_count}"
         hud_surf = font.render(hud_text, True, BLACK)
         screen.blit(hud_surf, (8, 8))
 
-
-        #agents info menu
+        # agents info menu
         if show_menu and selected_agent in agent_data:
             data = agent_data[selected_agent]
             ax, ay = selected_agent
             temp_at_agent = temp_grid[ay, ax]
-            
+            health = agent_health.get(selected_agent, HEALTHY)
+            exp = exposure.get(selected_agent, {"smoke": 0, "fire": 0})
+            heat_ticks = heat_exposure_ticks.get(selected_agent, 0)
+
+            nf_heat, f_heat, inc_heat = get_heat_thresholds(temp_at_agent)
+
+            health_str = ["HEALTHY", "INJURED", "FATALLY INJURED", "INCAPACITATED"][health]
+
             menu_x, menu_y = 10, 40
-            pygame.draw.rect(screen, (230, 230, 230), (menu_x, menu_y, 180, 140))
-            pygame.draw.rect(screen, BLACK, (menu_x, menu_y, 180, 140), 2)
+            pygame.draw.rect(screen, (230, 230, 230), (menu_x, menu_y, 200, 160))
+            pygame.draw.rect(screen, BLACK, (menu_x, menu_y, 200, 160), 2)
 
             lines = [
                 f"Agent ID: {data['id']}",
                 f"Speed: {data['speed']:.1f}",
                 f"Age: {data['age']}",
                 f"Panic: {data['panic']}",
+                f"Health: {health_str}",
                 f"Temp: {temp_at_agent:.1f}°C",
+                f"Heat Ticks: {heat_ticks}/{inc_heat if inc_heat != float('inf') else '∞'}",
+                f"Smoke: {exp['smoke']}/{SMOKE_THRESHOLD[2]}",
                 "ESC = Close"
             ]
             for i, text in enumerate(lines):
                 surf = font.render(text, True, BLACK)
-                screen.blit(surf, (menu_x + 8, menu_y + 8 + i * 20))
-            
+                screen.blit(surf, (menu_x + 8, menu_y + 8 + i * 16))
+
             # draw remove button
-            remove_rect = pygame.Rect(menu_x + 40, menu_y + 140, 100, 30)
+            remove_rect = pygame.Rect(menu_x + 50, menu_y + 160, 100, 30)
             pygame.draw.rect(screen, (200, 50, 50), remove_rect)
             pygame.draw.rect(screen, BLACK, remove_rect, 2)
             remove_text = font.render("Remove", True, WHITE)
