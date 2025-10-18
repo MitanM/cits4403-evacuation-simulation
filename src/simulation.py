@@ -300,7 +300,7 @@ def main():
 
     cell_size = CELL_SIZE
     screen = make_screen(grid_width, grid_height, cell_size)
-    pygame.display.set_caption("Evacuation Simulation with Temperature")
+    pygame.display.set_caption("Evacuation Simulation")
     clock = pygame.time.Clock()
     font = pygame.font.SysFont(None, 22)
 
