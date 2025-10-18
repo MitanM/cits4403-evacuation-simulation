@@ -3,6 +3,8 @@ import sys
 from collections import deque, defaultdict
 import random
 import numpy as np
+import json
+import os
 
 # --- Config ---
 CELL_SIZE = 20
@@ -25,6 +27,10 @@ MODE_WALL, MODE_AGENT, MODE_EXIT, MODE_FIRE = 1, 2, 3, 4
 
 # Agent health states
 HEALTHY, INJURED, FATALLY_INJURED, INCAPACITATED = 0, 1, 2, 3
+# Fire config
+FIRE_SPREAD_DELAY = 70    # fire spreads every X ticks
+SMOKE_SPREAD_DELAY = 18    # smoke spreads every X ticks
+EXIT_CAPACITY_PER_TICK = 1  # max agents that can go through each exit cell per tick
 
 # Fire config
 FIRE_SPREAD_DELAY = 70
@@ -146,6 +152,53 @@ def temp_to_color(temp):
 
     return (r, g, b)
 
+def save_layout(filename, grid, agents, exits, fires):
+    """Save current grid configuration to a JSON file."""
+    layout = {
+        "grid_width": len(grid[0]),
+        "grid_height": len(grid),
+        "walls": [(x, y) for y, row in enumerate(grid) for x, c in enumerate(row) if c == WALL],
+        "exits": exits,
+        "fires": fires,
+        "agents": agents
+    }
+
+    base_dir = os.path.dirname(os.path.dirname(__file__))
+    layouts_dir = os.path.join(base_dir, "data", "layouts")
+    os.makedirs(layouts_dir, exist_ok=True)
+    path = os.path.join(layouts_dir, filename)
+
+    with open(path, "w") as f:
+        json.dump(layout, f, indent=2)
+    print(f"Layout saved to {path}")
+
+
+def load_layout(filename):
+    """Load a layout JSON file and return grid + lists."""
+    base_dir = os.path.dirname(os.path.dirname(__file__))
+    path = os.path.join(base_dir, "data", "layouts", filename)
+
+    with open(path) as f:
+        layout = json.load(f)
+
+    grid_width = layout["grid_width"]
+    grid_height = layout["grid_height"]
+    grid = [[EMPTY for _ in range(grid_width)] for _ in range(grid_height)]
+
+    for (x, y) in layout["walls"]:
+        grid[y][x] = WALL
+    for (x, y) in layout["fires"]:
+        grid[y][x] = FIRE
+    for (x, y) in layout["exits"]:
+        grid[y][x] = EXIT
+
+    agents = sorted([tuple(a) for a in layout["agents"]])
+    exits = [tuple(e) for e in layout["exits"]]
+    fires = [tuple(f) for f in layout["fires"]]
+
+    print(f"Loaded layout: {filename}")
+    return grid, agents, exits, fires
+
 def make_screen(grid_w, grid_h, cell_size):
     return pygame.display.set_mode((grid_w * cell_size, grid_h * cell_size))
 
@@ -238,7 +291,9 @@ def spread_fire_and_smoke(grid, grid_width, grid_height, tick):
 def main():
     pygame.init()
 
-    try:
+    random.seed(42)
+    # Ask the user for grid size (weight and height) 
+    try: 
         grid_width = int(input("Enter grid width (number of cells): "))
         grid_height = int(input("Enter grid height (number of cells): "))
     except ValueError:
@@ -268,6 +323,11 @@ def main():
     heat_exposure_ticks = {}
     selected_agent = None
     show_menu = False
+    fires = []
+    show_global_menu = False
+    global_panic_value = 5  # default value we use
+
+    
 
     temp_grid = np.full((grid_height, grid_width), AMBIENT_TEMP, dtype=float)
 
@@ -304,6 +364,8 @@ def main():
                         exposure = {pos: {"smoke": 0, "fire": 0} for pos in agents}
                         agent_health = {pos: HEALTHY for pos in agents}
                         heat_exposure_ticks = {pos: 0 for pos in agents}
+                        dead_count = 0
+                        exposure = {pos: {"smoke": 0, "fire": 0} for pos in agents}
                         if exits:
                             dist_map = compute_distance_map(exits, grid, grid_width, grid_height)
                     running_sim = not running_sim
@@ -324,6 +386,39 @@ def main():
                     agent_data = {}
                     agent_health = {}
                     heat_exposure_ticks = {}
+                
+                elif event.key == pygame.K_m:
+                    show_global_menu = not show_global_menu
+                
+                elif event.key == pygame.K_s:
+                    save_layout("custom_layout.json", grid, agents, exits, 
+                                [(x, y) for y, row in enumerate(grid) for x, c in enumerate(row) if c == FIRE])
+                elif event.key == pygame.K_l:
+                    try:
+                        grid, agents, exits, fires = load_layout("DenseCorridor_layout.json")
+                        running_sim = False
+                        tick = 0
+                        exited_count = 0
+                        dead_count = 0
+
+                        random.seed(42)
+
+                        dist_map = compute_distance_map(exits, grid, grid_width, grid_height)
+
+                        agent_data = {}
+                        exposure = {}
+                        next_agent_id = 1
+                        for (ax, ay) in agents:
+                            agent_data[(ax, ay)] = {
+                                "id": next_agent_id,
+                                "speed": 1.0,
+                                "age": 30,
+                                "panic": 5
+                            }
+                            exposure[(ax, ay)] = {"smoke": 0, "fire": 0}
+                            next_agent_id += 1
+                    except FileNotFoundError:
+                        print("No layout found in /data/layouts/")
 
                 elif event.key in (pygame.K_EQUALS, pygame.K_PLUS):
                     cell_size = min(100, cell_size + 5)
@@ -331,7 +426,21 @@ def main():
                 elif event.key == pygame.K_MINUS:
                     cell_size = max(5, cell_size - 5)
                     screen = make_screen(grid_width, grid_height, cell_size)
-
+                
+                elif show_global_menu:
+                    if event.key == pygame.K_UP or event.key == pygame.K_RIGHT:
+                        global_panic_value = min(10, global_panic_value + 1)
+                    elif event.key == pygame.K_DOWN or event.key == pygame.K_LEFT:
+                        global_panic_value = max(0, global_panic_value - 1)
+                    elif event.key == pygame.K_RETURN:
+                        for pos in agent_data:
+                            agent_data[pos]["panic"] = global_panic_value
+                        print(f"All agents set to panic level {global_panic_value}")
+                        show_global_menu = False
+                    elif event.key == pygame.K_ESCAPE:
+                        show_global_menu = False
+                
+                # placeholder adjusting agents attributes
                 elif show_menu and selected_agent in agent_data:
                     if event.key == pygame.K_UP:
                         agent_data[selected_agent]["panic"] = min(10, agent_data[selected_agent]["panic"] + 1)
@@ -433,9 +542,10 @@ def main():
             temp_grid = diffuse_temperature(temp_grid, grid, grid_width, grid_height)
 
         if running_sim and dist_map is not None:
-            occupied = set(agents)
-            normal_targets = defaultdict(list)
-            exit_targets = defaultdict(list)
+            agents.sort()
+            occupied = set(agents)  # cells taken at start of tick
+            normal_targets = defaultdict(list) # stores the agents that want to move into each normal floor cell
+            exit_targets = defaultdict(list) # stores the agents that want to move into each exit cell 
 
             survivors_idx = set()
             winners_move = {}
@@ -563,7 +673,7 @@ def main():
                     normal_targets[move].append(idx)
 
             # Stage 2: resolve conflicts for normal cells (one winner per cell)
-            for target, idxs in normal_targets.items():
+            for target, idxs in sorted(normal_targets.items()):
                 if len(idxs) == 1:
                     winners_move[idxs[0]] = target
                 else:
@@ -574,7 +684,7 @@ def main():
 
             # Stage 3: resolve exits with capacity (queueing at doors)
             exit_cap_remaining = {e: EXIT_CAPACITY_PER_TICK for e in exits}
-            for exit_pos, idxs in exit_targets.items():
+            for exit_pos, idxs in sorted(exit_targets.items()):
                 random.shuffle(idxs)
                 cap = exit_cap_remaining.get(exit_pos, EXIT_CAPACITY_PER_TICK)
                 winners_to_exit = idxs[:cap]
@@ -691,8 +801,25 @@ def main():
         hud_text = f"Inside: {inside}   Exited: {exited_count}   Injured: {exited_injured_count}   Fatal: {exited_fatally_injured_count}   Casualties: {incapacitated_count}"
         hud_surf = font.render(hud_text, True, BLACK)
         screen.blit(hud_surf, (8, 8))
+        
+        # global panic and future to be speed menu (activate this by clicking m)
+        if show_global_menu:
+            menu_w, menu_h = 260, 100
+            menu_x = (screen.get_width() - menu_w) // 2
+            menu_y = (screen.get_height() - menu_h) // 2
+            pygame.draw.rect(screen, (230, 230, 230), (menu_x, menu_y, menu_w, menu_h))
+            pygame.draw.rect(screen, BLACK, (menu_x, menu_y, menu_w, menu_h), 2)
 
-        # agents info menu
+            title = font.render("Set Panic Level for All Agents", True, BLACK)
+            screen.blit(title, (menu_x + 15, menu_y + 10))
+
+            val_text = font.render(f"Panic: {global_panic_value}", True, (0, 0, 180))
+            screen.blit(val_text, (menu_x + 90, menu_y + 40))
+
+            hint_text = font.render("up or down arrow to change", True, BLACK)
+            screen.blit(hint_text, (menu_x + 25, menu_y + 70))
+
+        #agents info menu
         if show_menu and selected_agent in agent_data:
             data = agent_data[selected_agent]
             ax, ay = selected_agent
