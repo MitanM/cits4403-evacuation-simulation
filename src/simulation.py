@@ -18,6 +18,7 @@ BLUE = (0, 0, 255)
 GREEN = (0, 255, 0)
 ORANGE = (255, 165, 0)
 RED = (255, 0, 0)
+PURPLE = (128, 0, 128)
 
 # Cell types
 EMPTY, WALL, EXIT, FIRE, SMOKE = 0, 1, 2, 3, 4
@@ -27,15 +28,11 @@ MODE_WALL, MODE_AGENT, MODE_EXIT, MODE_FIRE = 1, 2, 3, 4
 
 # Agent health states
 HEALTHY, INJURED, FATALLY_INJURED, INCAPACITATED = 0, 1, 2, 3
+
 # Fire config
 FIRE_SPREAD_DELAY = 70    # fire spreads every X ticks
 SMOKE_SPREAD_DELAY = 18    # smoke spreads every X ticks
 EXIT_CAPACITY_PER_TICK = 1  # max agents that can go through each exit cell per tick
-
-# Fire config
-FIRE_SPREAD_DELAY = 70
-SMOKE_SPREAD_DELAY = 25
-EXIT_CAPACITY_PER_TICK = 1
 
 # Temperature config
 AMBIENT_TEMP = 20.0
@@ -327,8 +324,6 @@ def main():
     show_global_menu = False
     global_panic_value = 5  # default value we use
 
-    
-
     temp_grid = np.full((grid_height, grid_width), AMBIENT_TEMP, dtype=float)
 
     agent_data = {}
@@ -364,7 +359,6 @@ def main():
                         exposure = {pos: {"smoke": 0, "fire": 0} for pos in agents}
                         agent_health = {pos: HEALTHY for pos in agents}
                         heat_exposure_ticks = {pos: 0 for pos in agents}
-                        dead_count = 0
                         exposure = {pos: {"smoke": 0, "fire": 0} for pos in agents}
                         if exits:
                             dist_map = compute_distance_map(exits, grid, grid_width, grid_height)
@@ -399,7 +393,6 @@ def main():
                         running_sim = False
                         tick = 0
                         exited_count = 0
-                        dead_count = 0
 
                         random.seed(42)
 
@@ -461,7 +454,7 @@ def main():
                     continue
 
                 if show_menu and selected_agent:
-                    remove_rect = pygame.Rect(10 + 40, 40 + 160, 100, 30)
+                    remove_rect = pygame.Rect(10 + 40, 40 + 130, 100, 30)
                     if remove_rect.collidepoint(mx, my):
                         if selected_agent in agents:
                             agents.remove(selected_agent)
@@ -792,7 +785,7 @@ def main():
             elif health == FATALLY_INJURED:
                 color = RED
             elif health == INCAPACITATED:
-                color = (128, 0, 128)
+                color = PURPLE
 
             pygame.draw.rect(screen, color, rect)
 
@@ -833,8 +826,8 @@ def main():
             health_str = ["HEALTHY", "INJURED", "FATALLY INJURED", "INCAPACITATED"][health]
 
             menu_x, menu_y = 10, 40
-            pygame.draw.rect(screen, (230, 230, 230), (menu_x, menu_y, 200, 160))
-            pygame.draw.rect(screen, BLACK, (menu_x, menu_y, 200, 160), 2)
+            pygame.draw.rect(screen, (230, 230, 230), (menu_x, menu_y, 200, 170))
+            pygame.draw.rect(screen, BLACK, (menu_x, menu_y, 200, 170), 2)
 
             lines = [
                 f"Agent ID: {data['id']}",
@@ -852,7 +845,7 @@ def main():
                 screen.blit(surf, (menu_x + 8, menu_y + 8 + i * 16))
 
             # draw remove button
-            remove_rect = pygame.Rect(menu_x + 50, menu_y + 160, 100, 30)
+            remove_rect = pygame.Rect(menu_x + 50, menu_y + 130, 100, 30)
             pygame.draw.rect(screen, (200, 50, 50), remove_rect)
             pygame.draw.rect(screen, BLACK, remove_rect, 2)
             remove_text = font.render("Remove", True, WHITE)
