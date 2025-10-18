@@ -349,7 +349,8 @@ def main():
                                 "id": next_agent_id,
                                 "speed": 1.0,
                                 "age": 30,
-                                "panic": 1
+                                "panic": 1,
+                                "wait_ticks": 0
                             }
                             exposure[(gx, gy)] = {"smoke": 0, "fire": 0}
                             next_agent_id += 1
@@ -401,6 +402,15 @@ def main():
             # Stage 1: each agent declares an intended move (no stepping into occupied cells) 
             for idx, (ax, ay) in enumerate(agents):
                 if idx in dead_idx:
+                    continue
+                
+
+                speed = agent_data.get((ax, ay), {}).get("speed", 1.0)
+                wait_ticks = agent_data.get((ax, ay), {}).get("wait_ticks", 0)
+
+                if wait_ticks > 0:
+                    agent_data[(ax, ay)]["wait_ticks"] = wait_ticks - 1
+                    survivors_idx.add(idx)
                     continue
 
                 # Agent leaves if on exit and wont be added to next agents list
@@ -509,6 +519,12 @@ def main():
                 old_data = agent_data.get(pos)
                 if old_data is not None:
                     new_agent_data[new_pos] = old_data
+
+                    if pos != new_pos:
+                       speed = max(0.1, old_data["speed"])
+                       move_delay = max(0, int(round(1 / speed)) - 1)
+                       new_agent_data[new_pos]["wait_ticks"] = move_delay
+
                     if pos != new_pos and pos in agent_data:
                         del agent_data[pos]
                 
