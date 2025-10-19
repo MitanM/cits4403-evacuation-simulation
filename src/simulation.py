@@ -339,7 +339,9 @@ def main():
     fires = []
     show_global_menu = False
     global_panic_value = 5  # default value we use
-
+    global_agent_count = 50
+    global_speed_value = 1.0
+    
     temp_grid = np.full((grid_height, grid_width), AMBIENT_TEMP, dtype=float)
 
     agent_data = {}
@@ -452,17 +454,43 @@ def main():
                     screen = make_screen(grid_width, grid_height, cell_size)
                 
                 elif show_global_menu:
-                    if event.key == pygame.K_UP or event.key == pygame.K_RIGHT:
+                    # Adjust panic 
+                    if event.key == pygame.K_UP:
                         global_panic_value = min(10, global_panic_value + 1)
-                    elif event.key == pygame.K_DOWN or event.key == pygame.K_LEFT:
-                        global_panic_value = max(0, global_panic_value - 1)
+                    elif event.key == pygame.K_DOWN:
+                        global_panic_value = max(1, global_panic_value - 1)
+
+                    # Adjust speed
+                    elif event.key == pygame.K_RIGHT:
+                        global_speed_value = min(1.0, round(global_speed_value + 0.1, 1))
+                    elif event.key == pygame.K_LEFT:
+                        global_speed_value = max(0.1, round(global_speed_value - 0.1, 1))
+
+                    # Adjust how many agents
+                    elif event.key == pygame.K_x:
+                        if len(agent_data) > 0:
+                            global_agent_count = min(len(agent_data), global_agent_count + 1)
+                    elif event.key == pygame.K_z:
+                        global_agent_count = max(1, global_agent_count - 1)
+
+                    # Apply settings
                     elif event.key == pygame.K_RETURN:
                         for pos in agent_data:
                             agent_data[pos]["panic"] = global_panic_value
-                        print(f"All agents set to panic level {global_panic_value}")
+
+                        # Change speed for only a subset of agents
+                        all_agents = list(agent_data.keys())
+                        random.shuffle(all_agents)
+                        selected = all_agents[:global_agent_count]
+                        for pos in selected:
+                            agent_data[pos]["speed"] = global_speed_value
+
+                        print(f"Set panic {global_panic_value} for all, and speed {global_speed_value} for {global_agent_count} agents.")
                         show_global_menu = False
+
                     elif event.key == pygame.K_ESCAPE:
                         show_global_menu = False
+
                 
                 # placeholder adjusting agents attributes
                 elif show_menu and selected_agent in agent_data:
@@ -844,20 +872,26 @@ def main():
         
         # global panic and future to be speed menu (activate this by clicking m)
         if show_global_menu:
-            menu_w, menu_h = 260, 100
+            menu_w, menu_h = 300, 150
             menu_x = (screen.get_width() - menu_w) // 2
             menu_y = (screen.get_height() - menu_h) // 2
             pygame.draw.rect(screen, (230, 230, 230), (menu_x, menu_y, menu_w, menu_h))
             pygame.draw.rect(screen, BLACK, (menu_x, menu_y, menu_w, menu_h), 2)
 
-            title = font.render("Set Panic Level for All Agents", True, BLACK)
-            screen.blit(title, (menu_x + 15, menu_y + 10))
+            title = font.render("Global Agent Settings", True, BLACK)
+            screen.blit(title, (menu_x + 60, menu_y + 10))
 
-            val_text = font.render(f"Panic: {global_panic_value}", True, (0, 0, 180))
-            screen.blit(val_text, (menu_x + 90, menu_y + 40))
+            panic_text = font.render(f"Panic: {global_panic_value}", True, (0, 0, 180))
+            screen.blit(panic_text, (menu_x + 25, menu_y + 45))
 
-            hint_text = font.render("up or down arrow to change", True, BLACK)
-            screen.blit(hint_text, (menu_x + 25, menu_y + 70))
+            count_text = font.render(f"Agents to Change: {global_agent_count}", True, (0, 0, 180))
+            screen.blit(count_text, (menu_x + 25, menu_y + 70))
+
+            speed_text = font.render(f"Set Speed To: {global_speed_value:.1f}", True, (0, 0, 180))
+            screen.blit(speed_text, (menu_x + 25, menu_y + 95))
+
+            hint_text = font.render("z and x for number of agents,  Enter=Apply", True, BLACK)
+            screen.blit(hint_text, (menu_x + 8, menu_y + 125))
 
         #agents info menu
         if show_menu and selected_agent in agent_data:
