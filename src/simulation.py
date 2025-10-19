@@ -5,6 +5,7 @@ import random
 import numpy as np
 import json
 import os
+import time
 
 # --- Config ---
 CELL_SIZE = 20
@@ -327,6 +328,9 @@ def main():
     mode = MODE_AGENT
     tick = 0
     exited_count = 0
+    elapsed_time = 0.0
+    start_time = None
+    timer_running = False
     exited_injured_count = 0
     exited_fatally_injured_count = 0
     incapacitated_count = 0
@@ -380,6 +384,8 @@ def main():
                         exposure = {pos: {"smoke": 0, "fire": 0} for pos in agents}
                         if exits:
                             dist_map = compute_distance_map(exits, grid, grid_width, grid_height)
+                        start_time = time.time()
+                        timer_running = True
                     running_sim = not running_sim
                 elif event.key == pygame.K_r:
                     grid = [[EMPTY for _ in range(grid_width)] for _ in range(grid_height)]
@@ -398,6 +404,9 @@ def main():
                     agent_data = {}
                     agent_health = {}
                     heat_exposure_ticks = {}
+                    elapsed_time = 0.0
+                    start_time = None
+                    timer_running = False
                 
                 elif event.key == pygame.K_m:
                     show_global_menu = not show_global_menu
@@ -864,9 +873,14 @@ def main():
 
             pygame.draw.rect(screen, color, rect)
 
+        if timer_running and len(agents) == 0:
+            elapsed_time = time.time() - start_time
+            timer_running = False
+
         # HUD
         inside = len(agents)
-        hud_text = f"Inside: {inside}   Exited: {exited_count}   Injured: {exited_injured_count}   Fatal: {exited_fatally_injured_count}   Casualties: {incapacitated_count}"
+        current_time = time.time() - start_time if timer_running else elapsed_time
+        hud_text = f"Inside: {inside}   Exited: {exited_count}   Injured: {exited_injured_count}   Fatal: {exited_fatally_injured_count}   Casualties: {incapacitated_count}   Time: {current_time:.1f}s"
         hud_surf = font.render(hud_text, True, BLACK)
         screen.blit(hud_surf, (8, 8))
         
